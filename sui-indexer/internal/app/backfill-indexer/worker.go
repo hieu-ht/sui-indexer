@@ -157,8 +157,8 @@ func (w *worker) fetchTxs(ctx context.Context, checkpointCh chan<- *sui_model.Ch
 			),
 			w.blockStatusRepo.S().ColumnEqual("chain", "SUI"),
 			w.blockStatusRepo.S().FilterType(entity.BlockStatusType_BACKFILL),
-			w.blockStatusRepo.S().LimitOffset(w.limitCheckpoints, 0),
-			w.blockStatusRepo.S().SortBy("block_number", "DESC"), // comment out for performance problem
+			w.blockStatusRepo.S().Limit(w.limitCheckpoints),
+			//w.blockStatusRepo.S().SortBy("block_number", "DESC"), // comment out for performance problem
 		}
 		checkpointIds, err = w.blockStatusRepo.GetList(txCtx, scopes...)
 		if err != nil {

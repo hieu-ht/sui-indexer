@@ -15,7 +15,10 @@ func NewBlockStatus(b *base) *BlockStatusScope {
 
 func (s *BlockStatusScope) Locking() func(db *gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
-		return db.Clauses(clause.Locking{Strength: "UPDATE"})
+		return db.Clauses(clause.Locking{
+			Strength: "UPDATE",
+			Options:  "SKIP LOCKED",
+		})
 	}
 }
 

@@ -118,6 +118,16 @@ func (base) SortBy(field string, order string) func(db *gorm.DB) *gorm.DB {
 	}
 }
 
+func (base) Limit(l int) func(db *gorm.DB) *gorm.DB {
+	return func(db *gorm.DB) *gorm.DB {
+		var limit = 10
+		if l > 0 {
+			limit = l
+		}
+		return db.Limit(limit)
+	}
+}
+
 func (base) LimitOffset(l int, o int) func(db *gorm.DB) *gorm.DB {
 	return func(db *gorm.DB) *gorm.DB {
 		var limit, offset = 10, 0

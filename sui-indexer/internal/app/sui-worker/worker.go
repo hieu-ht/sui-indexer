@@ -146,7 +146,7 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 			),
 			w.blockStatusRepo.S().FilterType(entity.BlockStatusType_REALTIME),
 			w.blockStatusRepo.S().ColumnEqual("chain", "SUI"),
-			w.blockStatusRepo.S().LimitOffset(w.limitCheckpoints, 0),
+			w.blockStatusRepo.S().Limit(w.limitCheckpoints),
 			//w.blockStatusRepo.S().SortBy("block_number", "DESC"), // comment out for performance problem
 		}
 
