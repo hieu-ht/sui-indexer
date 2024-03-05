@@ -459,7 +459,7 @@ export const getTradeValue = async ({
     0
   );
   const amountFromData = tradeHistoryFromToken.reduce(
-    (prev, cur) => prev + cur.quanlity_out,
+    (prev, cur) => prev + cur.quanlity_in,
     0
   );
   console.timeEnd(`Agg price ${fromAddress}`);
