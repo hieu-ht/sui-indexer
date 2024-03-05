@@ -2,7 +2,7 @@
 
 SUI Ingest infrastructure
 
-![CleanShot 2024-02-23 at 17 32 31@2x](https://github.com/getnimbus/sui-indexer/assets/9281080/77f576ba-55a5-4bf0-8bee-56457bfbf625)
+![CleanShot 2024-02-23 at 17 32 31@2x](https://i.ibb.co/kmYtdK7/Clean-Shot-2024-03-05-at-18-33-16-2x.png)
 
 To write new SUI data ingest, you need to add a config following TS `IndexerConfig` on https://github.com/getnimbus/sui-indexer/blob/main/sui-ingest/swap/src/type.ts
 
