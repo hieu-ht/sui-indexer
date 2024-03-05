@@ -1,6 +1,6 @@
 ## Ingest SUI event and indexing Swap
 
-We ingest SUI Swap event and then index to Postgres DB
+We ingest Sui Swap event and then index to Postgres DB
 
 Currently support
 - Aftermath Finance
@@ -8,6 +8,13 @@ Currently support
 - FlowX
 - Kriya
 - Sui Swap
-- Turbos Fiannce
+- Turbos Finance
 
-For the backfill flow, we need to export CSV data and run it one time
+For the backfill flow, we need to export CSV data and run it one time. Please contact our team to get backfill data
+
+## Run Docker
+Add .env file from .env.example
+
+```
+docker run --env-file .env -d ghcr.io/getnimbus/sui-indexer_sui-ingest-swap:main
+```
