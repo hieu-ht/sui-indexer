@@ -383,7 +383,7 @@ export const getTradeValue = async ({
   const contractAdressCMCMapping = baseTokenMappingCMC;
 
   fromAddress = normalizedTokenAddress(fromAddress);
-  toAddress = normalizedTokenAddress(fromAddress);
+  toAddress = normalizedTokenAddress(toAddress);
 
   if (contractAdressCMCMapping[fromAddress]) {
     const historicalPriceCMC =
