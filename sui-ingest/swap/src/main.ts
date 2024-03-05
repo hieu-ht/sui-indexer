@@ -71,16 +71,20 @@ export const processingConfig: EventIndexerConfig = {
       item.to_token_address = normalizedTokenAddress(item.to_token_address);
     });
 
-    await prisma.trade
-      .createMany({
-        data: processData,
-        skipDuplicates: true,
-      })
-      .catch((error) => {
-        console.log(error);
+    if (process.env.TEST) {
+      console.log(processData);
+    } else {
+      await prisma.trade
+        .createMany({
+          data: processData,
+          skipDuplicates: true,
+        })
+        .catch((error) => {
+          console.log(error);
 
-        throw error;
-      });
+          throw error;
+        });
+    }
 
     console.log(
       `Done save ${processData.length} trades. Total ${events.length} events`
