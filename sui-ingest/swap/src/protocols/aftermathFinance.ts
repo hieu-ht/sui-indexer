@@ -196,7 +196,7 @@ export const processV2 = async (event: SuiEvent): Promise<trade> => {
     log_index: Number(event.id.eventSeq),
     exchange_name: PROTOCOL,
     timestamp: new Date(Number(event.timestampMs)),
-    pool_address: PROTOCOL, // TODO
+    pool_address: payload.pool_id,
     amount_usd: amountUsd,
     chain: "SUI",
     fee: 0, // TODO:
