@@ -9,6 +9,7 @@ Currently support
 - Kriya
 - Sui Swap
 - Turbos Finance
+- BlueMove
 
 For the backfill flow, we need to export CSV data and run it one time. Please contact our team to get backfill data
 

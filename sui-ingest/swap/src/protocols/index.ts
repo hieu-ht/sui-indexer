@@ -4,6 +4,7 @@ import suiSwap from "./suiSwap";
 import flowX from "./flowX";
 import kriya from "./kriya";
 import turbos from "./turbosFinance";
+import blueMove from "./blueMove";
 
 export const protocols = [
   aftermathFinance,
@@ -12,4 +13,5 @@ export const protocols = [
   kriya,
   turbos,
   suiSwap,
+  blueMove;
 ].flat();
