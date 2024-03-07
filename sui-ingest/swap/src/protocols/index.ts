@@ -13,5 +13,5 @@ export const protocols = [
   kriya,
   turbos,
   suiSwap,
-  blueMove;
+  blueMove,
 ].flat();
