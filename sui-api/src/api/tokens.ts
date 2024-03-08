@@ -2,7 +2,6 @@ import express from "express";
 import { prisma } from "@services/db";
 import { suiClient } from "@services/client";
 import { normalizedTokenAddress } from "@utils/index";
-import axios from "axios";
 
 /**
  * @swagger

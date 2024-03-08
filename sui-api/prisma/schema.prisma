@@ -86,3 +86,19 @@ model price_feeds {
   @@index([chain, token_address], map: "idx_chain_address_feed")
   @@index([timestamp], map: "idx_timestamp_feed")
 }
+
+model defi_vaults {
+  id          String
+  name        String
+  chain       String
+  protocol    String
+  apy         Float?
+  apy_7_day   Float?
+  tvl         Float?
+  reward      Json?
+  farm_link   String?
+  synced_at   DateTime
+
+  @@id([id])
+  @@index([chain])
+}

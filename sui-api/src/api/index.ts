@@ -3,6 +3,7 @@ import MessageResponse from "../interfaces/MessageResponse";
 import tokens from "./tokens";
 import trades from "./trades";
 import holding from "./holding";
+import yields from "./yields";
 
 const router = express.Router();
 
@@ -15,5 +16,6 @@ router.get<{}, MessageResponse>("/", (req, res) => {
 router.use("/tokens", tokens);
 router.use("/trades", trades);
 router.use("/holding", holding);
+router.use("/yields", yields);
 
 export default router;

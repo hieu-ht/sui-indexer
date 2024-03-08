@@ -12,7 +12,8 @@
     "baseUrl": ".",
     "paths": {
       "@services/*": ["src/services/*"],
-      "@utils/*": ["src/utils/*"]
+      "@utils/*": ["src/utils/*"],
+      "@interfaces/*": ["src/interfaces/*"]
     }
   },
   "include": ["./*.js", "src/**/*.ts", "test/**/*.ts"]
