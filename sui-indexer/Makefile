@@ -3,10 +3,10 @@
 default: di build;
 
 di:
-	go run github.com/google/wire/cmd/wire ./cmd/sui-master
-	go run github.com/google/wire/cmd/wire ./cmd/sui-worker
-	go run github.com/google/wire/cmd/wire ./cmd/cli
-	go run github.com/google/wire/cmd/wire ./cmd/backfill-indexer
+	wire ./cmd/sui-master
+	wire ./cmd/sui-worker
+	wire ./cmd/cli
+	wire ./cmd/backfill-indexer
 
 clean:
 	rm -rf ./out

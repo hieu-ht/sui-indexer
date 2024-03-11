@@ -1,18 +1,12 @@
-DROP TABLE IF EXISTS `sui_checkpoints`;
-
-CREATE EXTERNAL TABLE IF NOT EXISTS `sui_checkpoints` (
+-- create raw table for checkpoints
+CREATE EXTERNAL TABLE IF NOT EXISTS `raw_sui_checkpoints` (
     `epoch` bigint,
     `timestampMs` bigint,
     `sequenceNumber` bigint,
     `digest` string,
     `networkTotalTransactions` string,
     `previousDigest` string,
-    `epochRollingGasCostSummary` struct<
-        `computationCost`:string,
-        `storageCost`:string,
-        `storageRebate`:string,
-        `nonRefundableStorageFee`:string
-    >,
+    `epochRollingGasCostSummary` string,
     `validatorSignature` string,
     `eventsBloom` string,
     `packagesBloom` string
@@ -26,9 +20,17 @@ WITH SERDEPROPERTIES (
   'mapping' = 'TRUE'
 )
 STORED AS INPUTFORMAT 'org.apache.hadoop.mapred.TextInputFormat' OUTPUTFORMAT 'org.apache.hadoop.hive.ql.io.HiveIgnoreKeyTextOutputFormat'
-LOCATION 's3://sui-indexer/checkpoints/sui-checkpoints/'
+LOCATION 's3://nimbus-sui-indexer/checkpoints/sui-checkpoints/'
 TBLPROPERTIES ('classification' = 'json');
 
-MSCK REPAIR TABLE sui_checkpoints;
+MSCK REPAIR TABLE raw_sui_checkpoints;
 
-EXPLAIN ANALYZE SELECT * FROM sui_checkpoints WHERE datekey = '2024-01-27';
+-- create compressed table for checkpoints
+DROP TABLE IF EXISTS `final_sui_checkpoints`;
+
+CREATE TABLE final_sui_checkpoints WITH (
+   format = 'PARQUET',
+   parquet_compression = 'SNAPPY',
+   external_location = 's3://nimbus-sui-indexer/compressed/sui-checkpoints',
+   partitioned_by = ARRAY['dateKey']
+) AS SELECT * FROM raw_sui_checkpoints WHERE datekey = '2024-03-10';

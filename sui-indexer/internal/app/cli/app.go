@@ -7,24 +7,30 @@ import (
 
 	"github.com/getnimbus/ultrago/u_logger"
 	"github.com/getnimbus/ultrago/u_monitor"
+	"github.com/golang-module/carbon/v2"
+	"golang.org/x/sync/errgroup"
 
 	"feng-sui-core/internal/service"
 )
 
 func NewApp(
 	syncTradeSvc service.SyncTradeService,
+	compressionSvc service.CompressionService,
 ) App {
 	return &app{
-		syncTradeSvc: syncTradeSvc,
+		syncTradeSvc:   syncTradeSvc,
+		compressionSvc: compressionSvc,
 	}
 }
 
 type App interface {
 	SyncTrades(ctx context.Context, rawParams ...string) error
+	CompressData(ctx context.Context, rawParams ...string) error
 }
 
 type app struct {
-	syncTradeSvc service.SyncTradeService
+	syncTradeSvc   service.SyncTradeService
+	compressionSvc service.CompressionService
 }
 
 func (a *app) SyncTrades(ctx context.Context, rawParams ...string) error {
@@ -54,6 +60,52 @@ func (a *app) SyncTrades(ctx context.Context, rawParams ...string) error {
 		logger.Infof("not supported flag")
 		return nil
 	}
+}
+
+func (a *app) CompressData(ctx context.Context, rawParams ...string) error {
+	ctx, logger := u_logger.GetLogger(ctx)
+
+	defer u_monitor.TimeTrackWithCtx(ctx, time.Now())
+
+	params, err := a.prepareParams(2, rawParams...)
+	if err != nil {
+		return err
+	}
+
+	if len(params) == 1 { // compress data for a specific date
+		if err := a.compressionSvc.CompressData(ctx, carbon.Parse(params[0]).ToStdTime(), false); err != nil {
+			logger.Errorf("compress data failed: %v", err)
+			return err
+		}
+	} else if len(params) == 2 { // compress data for a range of dates
+		var (
+			fromDate          = carbon.Parse(params[0])
+			toDate            = carbon.Parse(params[1])
+			duration          = fromDate.DiffAbsInDays(toDate)
+			autoAddPartitions = true
+		)
+
+		eg, childCtx := errgroup.WithContext(ctx)
+		eg.SetLimit(5)
+		for i := 0; i < int(duration); i++ {
+			eg.Go(func() error {
+				if i != 0 && autoAddPartitions == true {
+					autoAddPartitions = false
+				}
+				if err := a.compressionSvc.CompressData(childCtx, fromDate.AddDays(i).ToStdTime(), autoAddPartitions); err != nil {
+					logger.Errorf("compress data failed: %v", err)
+					return err
+				}
+				return nil
+			})
+		}
+
+		if err := eg.Wait(); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (a *app) prepareParams(requires int, params ...string) ([]string, error) {

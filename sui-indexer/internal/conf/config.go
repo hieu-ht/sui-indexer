@@ -36,6 +36,7 @@ type config struct {
 	AwsAccessKeyId     string `mapstructure:"AWS_ACCESS_KEY_ID" default:"-"`
 	AwsSecretAccessKey string `mapstructure:"AWS_SECRET_ACCESS_KEY" default:"-"`
 	AwsBucket          string `mapstructure:"AWS_BUCKET" default:"sui-indexer"`
+	AthenaQueryResult  string `mapstructure:"ATHENA_QUERY_RESULT" default:"s3://nimbus-result/athena-query/"`
 
 	// kafka
 	KafkaBrokers        string `mapstructure:"KAFKA_BROKERS" default:"localhost:9092"`

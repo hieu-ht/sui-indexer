@@ -7,26 +7,30 @@ import (
 
 	"github.com/getnimbus/ultrago/u_logger"
 	"github.com/go-co-op/gocron/v2"
+	"github.com/golang-module/carbon/v2"
 	"github.com/google/uuid"
-	"github.com/gtuk/discordwebhook"
 
-	"feng-sui-core/internal/conf"
 	"feng-sui-core/internal/repo"
+	"feng-sui-core/internal/service"
+	"feng-sui-core/pkg/alert"
 )
 
 func NewCronjob(
 	blockStatusRepo repo.BlockStatusRepo,
 	master Master,
+	compressionSvc service.CompressionService,
 ) Cronjob {
 	return &cronjob{
 		blockStatusRepo: blockStatusRepo,
 		master:          master,
+		compressionSvc:  compressionSvc,
 	}
 }
 
 type cronjob struct {
 	blockStatusRepo repo.BlockStatusRepo
 	master          Master
+	compressionSvc  service.CompressionService
 }
 
 type Cronjob interface {
@@ -72,15 +76,7 @@ func (c *cronjob) Start(ctx context.Context) error {
 				func(jobID uuid.UUID, jobName string, err error) {
 					errMes := fmt.Sprintf("[sui-indexer] job %s with id %s failed: %v", jobName, jobID, err)
 					logger.Errorf(errMes)
-
-					if conf.Config.DiscordWebhook != "" {
-						message := discordwebhook.Message{
-							Content: &errMes,
-						}
-						if err := discordwebhook.SendMessage(conf.Config.DiscordWebhook, message); err != nil {
-							logger.Errorf("failed to send message to discord: %v", err)
-						}
-					}
+					alert.AlertDiscord(ctx, errMes)
 				},
 			),
 		),
@@ -118,15 +114,7 @@ func (c *cronjob) Start(ctx context.Context) error {
 				func(jobID uuid.UUID, jobName string, err error) {
 					errMes := fmt.Sprintf("[sui-indexer] job %s with id %s failed: %v", jobName, jobID, err)
 					logger.Errorf(errMes)
-
-					if conf.Config.DiscordWebhook != "" {
-						message := discordwebhook.Message{
-							Content: &errMes,
-						}
-						if err := discordwebhook.SendMessage(conf.Config.DiscordWebhook, message); err != nil {
-							logger.Errorf("failed to send message to discord: %v", err)
-						}
-					}
+					alert.AlertDiscord(ctx, errMes)
 				},
 			),
 		),
@@ -134,6 +122,44 @@ func (c *cronjob) Start(ctx context.Context) error {
 	if err != nil {
 		logger.Errorf("failed to registered job %s: %v", j2.Name(), err)
 		return fmt.Errorf("failed to registered job %s: %v", j2.Name(), err)
+	}
+
+	// compress sui data in S3 using Athena
+	j3, err := s.NewJob(
+		gocron.CronJob(
+			"30 0 * * *",
+			false,
+		),
+		gocron.NewTask(
+			func() {
+				logger.Info("start compress sui data in S3...")
+				runningDate := carbon.Now(carbon.UTC).SubDays(1).StartOfDay().ToStdTime()
+				if err := c.compressionSvc.CompressData(ctx, runningDate, true); err != nil {
+					alert.AlertDiscord(ctx, fmt.Sprintf("[%s] failed to compressed sui data in S3: %v", runningDate, err))
+				}
+				logger.Info("end compress sui data in S3!")
+			},
+		),
+		gocron.WithName("compress_sui_data"),
+		gocron.WithSingletonMode(gocron.LimitModeReschedule),
+		gocron.WithEventListeners(
+			gocron.AfterJobRuns(
+				func(jobID uuid.UUID, jobName string) {
+					logger.Infof("job %s with id %s finished", jobName, jobID)
+				},
+			),
+			gocron.AfterJobRunsWithError(
+				func(jobID uuid.UUID, jobName string, err error) {
+					errMes := fmt.Sprintf("[sui-indexer] job %s with id %s failed: %v", jobName, jobID, err)
+					logger.Errorf(errMes)
+					alert.AlertDiscord(ctx, errMes)
+				},
+			),
+		),
+	)
+	if err != nil {
+		logger.Errorf("failed to registered job %s: %v", j3.Name(), err)
+		return fmt.Errorf("failed to registered job %s: %v", j3.Name(), err)
 	}
 
 	s.Start() // non-blocking
@@ -153,6 +179,10 @@ func (c *cronjob) Start(ctx context.Context) error {
 			j2LastRun, _ := j2.LastRun()
 			j2NextRun, _ := j2.NextRun()
 			logger.Infof("job %s last run: %s, next run: %s", j2.Name(), j2LastRun, j2NextRun)
+
+			j3LastRun, _ := j3.LastRun()
+			j3NextRun, _ := j3.NextRun()
+			logger.Infof("job %s last run: %s, next run: %s", j3.Name(), j3LastRun, j3NextRun)
 		}
 	}
 }

@@ -4,7 +4,7 @@ RUN apt update && apt install curl unzip -y
 
 ENV GOPATH=/go
 
-RUN go install github.com/google/wire/cmd/wire@v0.5.0
+RUN go install github.com/google/wire/cmd/wire@v0.6.0
 
 WORKDIR /src
 

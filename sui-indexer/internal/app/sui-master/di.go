@@ -16,6 +16,7 @@ var deps = wire.NewSet(
 	gorm_scope.GraphSet,
 	gorm.GraphSet,
 	service.GraphSet,
+	service.NewCompressionService,
 )
 
 var GraphSet = wire.NewSet(

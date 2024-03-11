@@ -8,15 +8,19 @@ import (
 	"github.com/getnimbus/ultrago/u_logger"
 	"github.com/getnimbus/ultrago/u_monitor"
 	"golang.org/x/sync/errgroup"
+
+	"feng-sui-core/internal/service"
 )
 
 func NewApp(
 	cronjob Cronjob,
 	master Master,
+	compressionSvc service.CompressionService,
 ) App {
 	return &app{
-		cronjob: cronjob,
-		master:  master,
+		cronjob:        cronjob,
+		master:         master,
+		compressionSvc: compressionSvc,
 	}
 }
 
@@ -26,8 +30,9 @@ type App interface {
 }
 
 type app struct {
-	cronjob Cronjob
-	master  Master
+	cronjob        Cronjob
+	master         Master
+	compressionSvc service.CompressionService
 }
 
 func (a *app) Start(ctx context.Context) error {
@@ -43,8 +48,18 @@ func (a *app) Start(ctx context.Context) error {
 	//}
 	//return nil
 
-	eg, childCtx := errgroup.WithContext(ctx)
+	// TODO: test compress data in S3
+	//if err := a.compressionSvc.CompressData(
+	//	ctx,
+	//	time.Date(2024, 3, 9, 0, 0, 0, 0, time.Local),
+	//	false,
+	//); err != nil {
+	//	logger.Errorf("failed to compress data: %v", err)
+	//	return fmt.Errorf("failed to compress data: %v", err)
+	//}
+	//return nil
 
+	eg, childCtx := errgroup.WithContext(ctx)
 	// start cronjob for update failed block status
 	eg.Go(func() error {
 		if err := a.cronjob.Start(childCtx); err != nil {

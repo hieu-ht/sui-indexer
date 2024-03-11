@@ -10,7 +10,6 @@ import (
 
 	sui_client "github.com/coming-chat/go-sui/v2/client"
 	"github.com/getnimbus/ultrago/u_logger"
-	"github.com/gtuk/discordwebhook"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
 
@@ -18,6 +17,7 @@ import (
 	"feng-sui-core/internal/entity"
 	"feng-sui-core/internal/repo"
 	"feng-sui-core/internal/service"
+	"feng-sui-core/pkg/alert"
 )
 
 func NewMaster(
@@ -193,17 +193,9 @@ func (m *master) Monitor(ctx context.Context) error {
 	}
 
 	delayBlocks := latestCheckpointSeq - currentBlock
-	var content = fmt.Sprintf("SUI - %v/%v. Delay %v blocks", currentBlock, latestCheckpointSeq, delayBlocks)
-	logger.Info(content)
-
-	if conf.Config.DiscordWebhook != "" {
-		message := discordwebhook.Message{
-			Content: &content,
-		}
-		if err := discordwebhook.SendMessage(conf.Config.DiscordWebhook, message); err != nil {
-			logger.Errorf("failed to send message to discord: %v", err)
-		}
-	}
+	var message = fmt.Sprintf("SUI - %v/%v. Delay %v blocks", currentBlock, latestCheckpointSeq, delayBlocks)
+	logger.Info(message)
+	alert.AlertDiscord(ctx, message)
 
 	return nil
 }

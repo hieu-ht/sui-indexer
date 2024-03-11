@@ -16,7 +16,7 @@ CREATE EXTERNAL TABLE IF NOT EXISTS `sui_events` (
 PARTITIONED BY (`dateKey` string)
 ROW FORMAT SERDE 'org.openx.data.jsonserde.JsonSerDe'
 WITH SERDEPROPERTIES (
-  'ignore.malformed.json' = 'FALSE',
+  'ignore.malformed.json' = 'TRUE',
   'dots.in.keys' = 'FALSE',
   'case.insensitive' = 'TRUE',
   'mapping' = 'TRUE'
