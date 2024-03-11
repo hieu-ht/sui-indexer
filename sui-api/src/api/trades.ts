@@ -1,6 +1,8 @@
 import express from "express";
 import { prisma } from "@services/db";
 import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+dayjs.extend(utc)
 
 /**
  * @swagger

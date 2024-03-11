@@ -1,6 +1,8 @@
 import express from "express";
 import { prisma } from "@services/db";
 import dayjs from "dayjs";
+import utc from "dayjs/plugin/utc";
+dayjs.extend(utc);
 
 /**
  * @swagger
@@ -72,7 +74,7 @@ import dayjs from "dayjs";
 
 const router = express.Router();
 
-router.get("/yields", async (req, res) => {
+router.get("/", async (req, res) => {
   const today = dayjs.utc().startOf("day");
 
   try {
@@ -84,6 +86,14 @@ router.get("/yields", async (req, res) => {
         },
         chain: "SUI",
       },
+      orderBy: [
+        {
+          tvl: "desc",
+        },
+        {
+          apy: "desc",
+        },
+      ],
     });
 
     return res.status(200).json({ data: yields });
