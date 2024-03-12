@@ -67,32 +67,38 @@ func (a *app) CompressData(ctx context.Context, rawParams ...string) error {
 
 	defer u_monitor.TimeTrackWithCtx(ctx, time.Now())
 
-	params, err := a.prepareParams(2, rawParams...)
+	params, err := a.prepareParams(1, rawParams...)
 	if err != nil {
 		return err
 	}
 
 	if len(params) == 1 { // compress data for a specific date
-		if err := a.compressionSvc.CompressData(ctx, carbon.Parse(params[0]).ToStdTime(), false); err != nil {
+		runningDate := carbon.Parse(params[0], carbon.UTC)
+		logger.Infof("compressing data for date: %s", runningDate.ToDateString())
+		if err := a.compressionSvc.CompressData(ctx, runningDate.ToStdTime(), false); err != nil {
 			logger.Errorf("compress data failed: %v", err)
 			return err
 		}
 	} else if len(params) == 2 { // compress data for a range of dates
 		var (
-			fromDate          = carbon.Parse(params[0])
-			toDate            = carbon.Parse(params[1])
+			fromDate          = carbon.Parse(params[0], carbon.UTC)
+			toDate            = carbon.Parse(params[1], carbon.UTC)
 			duration          = fromDate.DiffAbsInDays(toDate)
 			autoAddPartitions = true
 		)
 
 		eg, childCtx := errgroup.WithContext(ctx)
-		eg.SetLimit(5)
+		eg.SetLimit(3) // limit the number of concurrent goroutines
+
 		for i := 0; i < int(duration); i++ {
+			runningDate := fromDate.AddDays(i)
+
 			eg.Go(func() error {
+				logger.Infof("compressing data for date: %s", runningDate.ToDateString())
 				if i != 0 && autoAddPartitions == true {
 					autoAddPartitions = false
 				}
-				if err := a.compressionSvc.CompressData(childCtx, fromDate.AddDays(i).ToStdTime(), autoAddPartitions); err != nil {
+				if err := a.compressionSvc.CompressData(childCtx, runningDate.ToStdTime(), autoAddPartitions); err != nil {
 					logger.Errorf("compress data failed: %v", err)
 					return err
 				}
