@@ -135,7 +135,6 @@ const backfillData = async (config: IndexerConfig) => {
       });
       await config.handler(parseData);
     }
-
     if (config.type === "tx") {
       const parseData: SuiTx[] = rows.map((item) => {
         // TODO: Convert to right format
@@ -154,6 +153,8 @@ const backfillData = async (config: IndexerConfig) => {
     }
   };
 
+  const [from, to] = await config.getBackfillRange();
+
   fs.createReadStream(
     process.env.BACKFILL_FILE as string
     // path.resolve(__dirname, "../backfill_data", "example.csv")
@@ -161,7 +162,10 @@ const backfillData = async (config: IndexerConfig) => {
     .pipe(csv.parse({ headers: true }))
     .on("error", (error) => console.error(error))
     .on("data", async (row) => {
-      rows.push(row);
+      if (Number(row.checkpoint) > from && Number(row.checkpoint) < to) {
+        // In-range check
+        rows.push(row);
+      }
       if (rows.length >= config.backfillBatch) {
         await processData(rows);
         rows = [];

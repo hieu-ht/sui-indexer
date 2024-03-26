@@ -113,20 +113,24 @@ export const processingConfig: EventIndexerConfig = {
       .then((data) => data?.block || null);
   },
   async getBackfillRange() {
+    const CHECKPOINT = 27950539;
     const earliestLiveSnapshot = await prisma.trade
       .findFirst({
         select: {
           block: true,
         },
         where: {
+          block: {
+            lt: CHECKPOINT,
+          },
           chain: "SUI",
         },
         orderBy: {
-          block: "asc",
+          block: "desc",
         },
       })
       .then((data) => data?.block || 0); // TODO: Get from backfill range
-    return [24964427, earliestLiveSnapshot];
+    return [earliestLiveSnapshot, CHECKPOINT];
   },
   backfillBatch: 1000,
 };
