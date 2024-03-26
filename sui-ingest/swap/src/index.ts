@@ -116,7 +116,7 @@ const backfillData = async (config: IndexerConfig) => {
   const processData = async (rows: any[]) => {
     if (config.type === "event") {
       const parseData: SuiEvent[] = rows.map((item) => {
-        const idParsed = parseStruct(item.id);
+        const idParsed = item.id;
         return {
           id: {
             txDigest: idParsed.txdigest,
@@ -130,7 +130,7 @@ const backfillData = async (config: IndexerConfig) => {
           timestampMs: item.timestampMs,
           dateKey: item.dateKey,
           checkpoint: item.checkpoint,
-          gasUsed: parseStruct(item.gasUsed),
+          gasUsed: item.gasUsed,
         };
       });
       await config.handler(parseData);
@@ -144,10 +144,10 @@ const backfillData = async (config: IndexerConfig) => {
           digest: item.digest,
           checkpoint: item.checkpoint,
           timestampMs: item.timestampMs,
-          effects: parseStruct(item.effects),
-          objectChanges: parseStruct(item.objectchanges),
-          events: parseStruct(item.events),
-          balanceChanges: parseStruct(item.balancechanges),
+          effects: item.effects,
+          objectChanges: item.objectchanges,
+          events: item.events,
+          balanceChanges: item.balancechanges,
         };
       });
       await config.handler(parseData);
@@ -155,7 +155,8 @@ const backfillData = async (config: IndexerConfig) => {
   };
 
   fs.createReadStream(
-    path.resolve(__dirname, "../backfill_data", "example.csv")
+    process.env.BACKFILL_FILE as string
+    // path.resolve(__dirname, "../backfill_data", "example.csv")
   )
     .pipe(csv.parse({ headers: true }))
     .on("error", (error) => console.error(error))
