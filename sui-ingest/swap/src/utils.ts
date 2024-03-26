@@ -246,11 +246,11 @@ async function getCMCPricing(id: number, startDate: number, endDate: number) {
           .get(
             `/data-api/v3/cryptocurrency/detail/chart?id=${id}&range=${startTimeData}~${endTimeData}`
           )
-          .then((res) => res.data)
-          .catch((error) => {
-            console.log(error);
-            return {};
-          });
+          .then((res) => res.data);
+        // .catch((error) => {
+        //   console.log(error);
+        //   return {};
+        // });
       })
     );
 
