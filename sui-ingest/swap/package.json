@@ -9,6 +9,7 @@
     "build": "swc src -d dist --copy-files",
     "build:watch": "swc src -d dist --copy-files --watch",
     "start": "dotenv -- node dist/index.js",
+    "topics": "ts-node -T src/topics.ts",
     "start:watch": "dotenv -- nodemon dist/index.js",
     "gen:model": "npx prisma generate",
     "test": "TEST=true ts-node -T src/test.ts",
