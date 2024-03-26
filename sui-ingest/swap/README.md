@@ -19,3 +19,11 @@ Add .env file from .env.example
 ```
 docker run --env-file .env -d ghcr.io/getnimbus/sui-indexer_sui-ingest-swap:main
 ```
+
+## Docker backfill
+1. Add .env
+2. Run command
+
+```
+docker run --env-file .env -v .:/data ghcr.io/getnimbus/sui-indexer_sui-ingest-swap:main
+```
