@@ -7,6 +7,8 @@ COPY yarn.lock .
 ADD prisma/schema.prisma prisma/schema.prisma
 RUN corepack enable
 
+VOLUME [ "/data" ]
+
 # RUN apk add make cmake gcc g++ python3
 RUN yarn
 
