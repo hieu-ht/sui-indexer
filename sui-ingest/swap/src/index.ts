@@ -178,10 +178,12 @@ const backfillData = async (config: IndexerConfig) => {
 function start() {
   // TODO: Run in 2 process
   if (process.env.REALTIME_ONLY) {
+    console.log("START REALTIME MODE");
     liveIndexer(processingConfig);
   }
 
   if (process.env.BACKFILL_ONLY) {
+    console.log("START BACKFILL MODE");
     backfillData(processingConfig);
   }
 }
