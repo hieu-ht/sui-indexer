@@ -102,7 +102,7 @@ func (svc *compressionService) CompressData(ctx context.Context, runningDate tim
 	})
 
 	eg2.Go(func() error {
-		rows, err := db.QueryContext(childCtx, fmt.Sprintf("INSERT INTO final_sui_txs SELECT * FROM raw_sui_txs WHERE datekey = '%s'", runningDate.Format(time.DateOnly)))
+		rows, err := db.QueryContext(childCtx, fmt.Sprintf("INSERT INTO final_sui_txs SELECT digest, timestampms, checkpoint, transaction, effects, events, objectchanges, balancechanges, DATE(datekey) FROM raw_sui_txs WHERE datekey = '%s'", runningDate.Format(time.DateOnly)))
 		if err != nil {
 			logger.Errorf("failed to execute query: %v", err)
 			return fmt.Errorf("failed to execute query: %v", err)
