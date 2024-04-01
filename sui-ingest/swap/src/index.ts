@@ -160,6 +160,8 @@ const backfillData = async (config: IndexerConfig) => {
     // path.resolve(__dirname, "../backfill_data", "example.csv")
   );
 
+  let batch = 0;
+
   readStream
     .pipe(csv.parse({ headers: true }))
     .on("error", (error) => console.error(error))
@@ -171,6 +173,8 @@ const backfillData = async (config: IndexerConfig) => {
       if (rows.length >= config.backfillBatch) {
         readStream.pause();
         await processData(rows);
+        console.log(`Done process ${batch}`);
+        batch++;
         readStream.resume();
         await processData(rows);
         rows = [];
