@@ -154,14 +154,25 @@ const backfillData = async (config: IndexerConfig) => {
     }
   };
 
-  fs.createReadStream(
-    path.resolve(__dirname, "../backfill_data", "example.csv")
-  )
+  const [from, to] = await config.getBackfillRange();
+
+  const readStream = fs.createReadStream(
+    process.env.BACKFILL_FILE as string
+    // path.resolve(__dirname, "../backfill_data", "example.csv")
+  );
+
+  readStream
     .pipe(csv.parse({ headers: true }))
     .on("error", (error) => console.error(error))
     .on("data", async (row) => {
-      rows.push(row);
+      if (Number(row.checkpoint) > from && Number(row.checkpoint) < to) {
+        // In-range check
+        rows.push(row);
+      }
       if (rows.length >= config.backfillBatch) {
+        readStream.pause();
+        await processData(rows);
+        readStream.resume();
         await processData(rows);
         rows = [];
       }
