@@ -75,16 +75,16 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Deploy App to CapRover
-        uses: caprover/deploy-from-github@main
-        with:
-          server: "${{ secrets.CAPROVER_SERVER }}"
-          app: "${{ secrets.APP_NAME }}"
-          token: "${{ secrets.CAPROVER_TOKEN }}"
-          image: "${{ steps.meta.outputs.tags }}"
-      - name: Discord notification
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
-        uses: Ilshidur/action-discord@master
-        with:
-          args: "Deployed new version to https://sui-defi.getnimbus.io with image `${{ steps.meta.outputs.tags }}` commit `${{ github.event.head_commit.message }}`"
+      # - name: Deploy App to CapRover
+      #   uses: caprover/deploy-from-github@main
+      #   with:
+      #     server: "${{ secrets.CAPROVER_SERVER }}"
+      #     app: "${{ secrets.APP_NAME }}"
+      #     token: "${{ secrets.CAPROVER_TOKEN }}"
+      #     image: "${{ steps.meta.outputs.tags }}"
+      # - name: Discord notification
+      #   env:
+      #     DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+      #   uses: Ilshidur/action-discord@master
+      #   with:
+      #     args: "Deployed new version to https://sui-defi.getnimbus.io with image `${{ steps.meta.outputs.tags }}` commit `${{ github.event.head_commit.message }}`"
