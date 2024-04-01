@@ -1,6 +1,6 @@
 ## Ingest SUI event and indexing Swap
 
-We ingest AMM to get user positions
+We ingest to get user positions
 
 Currently support
 - Aftermath Finance
