@@ -116,7 +116,7 @@ const backfillData = async (config: IndexerConfig) => {
   const processData = async (rows: any[]) => {
     if (config.type === "event") {
       const parseData: SuiEvent[] = rows.map((item) => {
-        const idParsed = item.id;
+        const idParsed = parseStruct(item.id);
         return {
           id: {
             txDigest: idParsed.txdigest,
@@ -130,11 +130,12 @@ const backfillData = async (config: IndexerConfig) => {
           timestampMs: item.timestampMs,
           dateKey: item.dateKey,
           checkpoint: item.checkpoint,
-          gasUsed: item.gasUsed,
+          gasUsed: parseStruct(item.gasUsed),
         };
       });
       await config.handler(parseData);
     }
+
     if (config.type === "tx") {
       const parseData: SuiTx[] = rows.map((item) => {
         // TODO: Convert to right format
@@ -143,10 +144,10 @@ const backfillData = async (config: IndexerConfig) => {
           digest: item.digest,
           checkpoint: item.checkpoint,
           timestampMs: item.timestampMs,
-          effects: item.effects,
-          objectChanges: item.objectchanges,
-          events: item.events,
-          balanceChanges: item.balancechanges,
+          effects: parseStruct(item.effects),
+          objectChanges: parseStruct(item.objectchanges),
+          events: parseStruct(item.events),
+          balanceChanges: parseStruct(item.balancechanges),
         };
       });
       await config.handler(parseData);
@@ -160,8 +161,6 @@ const backfillData = async (config: IndexerConfig) => {
     // path.resolve(__dirname, "../backfill_data", "example.csv")
   );
 
-  let batch = 0;
-
   readStream
     .pipe(csv.parse({ headers: true }))
     .on("error", (error) => console.error(error))
@@ -173,8 +172,6 @@ const backfillData = async (config: IndexerConfig) => {
       if (rows.length >= config.backfillBatch) {
         readStream.pause();
         await processData(rows);
-        console.log(`Done process ${batch}`);
-        batch++;
         readStream.resume();
         await processData(rows);
         rows = [];
@@ -191,12 +188,10 @@ const backfillData = async (config: IndexerConfig) => {
 function start() {
   // TODO: Run in 2 process
   if (process.env.REALTIME_ONLY) {
-    console.log("START REALTIME MODE");
     liveIndexer(processingConfig);
   }
 
   if (process.env.BACKFILL_ONLY) {
-    console.log("START BACKFILL MODE");
     backfillData(processingConfig);
   }
 }
