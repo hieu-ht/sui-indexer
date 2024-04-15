@@ -147,7 +147,7 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 			w.blockStatusRepo.S().FilterType(entity.BlockStatusType_REALTIME),
 			w.blockStatusRepo.S().ColumnEqual("chain", "SUI"),
 			w.blockStatusRepo.S().Limit(w.limitCheckpoints),
-			//w.blockStatusRepo.S().SortBy("block_number", "DESC"), // comment out for performance problem
+			w.blockStatusRepo.S().SortBy("block_number", "ASC"),
 		}
 
 		checkpointIds, err = w.blockStatusRepo.GetList(txCtx, scopes...)
@@ -170,7 +170,7 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 	var checkpoints []*sui_model.Checkpoint
 	checkpoints, err = retry.DoWithData(
 		func() ([]*sui_model.Checkpoint, error) {
-			return w.suiIndexer.FetchCheckpoints(ctx, strconv.FormatInt(checkpointIds[0].BlockNumber, 10), w.limitCheckpoints)
+			return w.suiIndexer.FetchCheckpoints(ctx, strconv.FormatInt(checkpointIds[0].BlockNumber, 10), strconv.FormatInt(checkpointIds[len(checkpointIds)-1].BlockNumber, 10))
 		},
 		// retry configs
 		[]retry.Option{

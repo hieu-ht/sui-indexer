@@ -3,8 +3,11 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"testing"
+	"time"
 
+	sui_client "github.com/coming-chat/go-sui/v2/client"
 	"github.com/smartystreets/goconvey/convey"
 	"golang.org/x/exp/slices"
 
@@ -17,8 +20,19 @@ func TestBlockSubscribeService(t *testing.T) {
 	_ = conf.LoadConfig(".")
 
 	convey.FocusConvey("TestSuiIndexerService", t, func() {
-		indexer, err := NewSuiIndexer()
+		transport := http.DefaultTransport.(*http.Transport)
+		client, err := sui_client.DialWithClient(conf.Config.SuiRpc, &http.Client{
+			Transport: transport.Clone(),
+			Timeout:   2 * 60 * time.Second, // 2 mins
+		})
 		convey.So(err, convey.ShouldBeNil)
+		fallbackClient, err := sui_client.DialWithClient(conf.Config.FallbackSuiRpc, &http.Client{
+			Transport: transport.Clone(),
+			Timeout:   2 * 60 * time.Second, // 2 mins
+		})
+		convey.So(err, convey.ShouldBeNil)
+
+		indexer := NewSuiIndexer(client, fallbackClient)
 
 		convey.Convey("Fetch latest checkpoint", func() {
 			res, err := indexer.FetchLatestCheckpoint(ctx)
@@ -28,7 +42,7 @@ func TestBlockSubscribeService(t *testing.T) {
 		})
 
 		convey.Convey("Fetch checkpoints", func() {
-			res, err := indexer.FetchCheckpoints(ctx, "25081993", 100)
+			res, err := indexer.FetchCheckpoints(ctx, "25081993", "25082093")
 			convey.So(err, convey.ShouldBeNil)
 			convey.So(len(res), convey.ShouldNotBeZeroValue)
 			convey.So(true, convey.ShouldEqual, slices.Contains(res[0].Transactions, "9tqki1JHL2zCwVPSge5TCbqjquJpGzkQXXRX4qpeB9nL"))

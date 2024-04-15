@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 
 	sui_client "github.com/coming-chat/go-sui/v2/client"
@@ -35,12 +36,8 @@ func (svc *SuiIndexer) FetchCheckpoint(ctx context.Context, id string) (*sui_mod
 	return &resp, svc.fallbackClient.CallContext(ctx, &resp, sui_client.SuiMethod("getCheckpoint"), id)
 }
 
-func (svc *SuiIndexer) FetchCheckpoints(ctx context.Context, checkpointId string, limit int) ([]*sui_model.Checkpoint, error) {
-	if limit <= 0 || limit >= 100 {
-		limit = 100
-	}
-
-	fromId, err := strconv.ParseInt(checkpointId, 10, 64)
+func (svc *SuiIndexer) FetchCheckpoints(ctx context.Context, fromCheckpointId string, toCheckpointId string) ([]*sui_model.Checkpoint, error) {
+	fromId, err := strconv.ParseInt(fromCheckpointId, 10, 64)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +45,18 @@ func (svc *SuiIndexer) FetchCheckpoints(ctx context.Context, checkpointId string
 		// E.g. fromId=1 then method `getCheckpoints` will return checkpoints from 2
 		// Because of that we need to decrease `fromId` by 1
 		fromId = fromId - 1
+	} else {
+		return nil, fmt.Errorf("from checkpoint id must be larger than 0")
 	}
+
+	toId, err := strconv.ParseInt(toCheckpointId, 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	if toId < fromId {
+		return nil, fmt.Errorf("to checkpoint id must be equal or larger than fromCheckpointId")
+	}
+	limit := toId - fromId
 
 	var resp = struct {
 		Data        []*sui_model.Checkpoint `json:"data"`
