@@ -12,6 +12,7 @@ import (
 	sui_client "github.com/coming-chat/go-sui/v2/client"
 	"github.com/coming-chat/go-sui/v2/types"
 	"github.com/getnimbus/ultrago/u_logger"
+	"github.com/hashicorp/golang-lru/v2/expirable"
 	"github.com/samber/lo"
 	"golang.org/x/sync/errgroup"
 	"gorm.io/gorm"
@@ -57,8 +58,9 @@ func NewWorker(
 		blockStatusRepo:  blockStatusRepo,
 		baseSvc:          baseSvc,
 		suiIndexer:       service.NewSuiIndexer(client, fallbackClient),
-		limitCheckpoints: 10,
-		numWorkers:       10, // 1 checkpoint/s
+		cache:            expirable.NewLRU[string, bool](200, nil, 20*time.Second),
+		limitCheckpoints: 10, // maximum is 10
+		numWorkers:       3,  // 1 checkpoint/s
 		cooldown:         5 * time.Second,
 		checkpointsTopic: conf.Config.SuiCheckpointsTopic,
 		txsTopic:         conf.Config.SuiTxsTopic,
@@ -72,6 +74,7 @@ type worker struct {
 	blockStatusRepo  repo.BlockStatusRepo
 	baseSvc          service.BaseService
 	suiIndexer       *service.SuiIndexer
+	cache            *expirable.LRU[string, bool]
 	limitCheckpoints int
 	numWorkers       int
 	cooldown         time.Duration
@@ -103,6 +106,8 @@ func (w *worker) FetchTxs(ctx context.Context) error {
 				}
 			}
 		})
+
+		time.Sleep(1 * time.Second) // cooldown worker
 	}
 
 	return eg.Wait()
@@ -170,7 +175,39 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 	var checkpoints []*sui_model.Checkpoint
 	checkpoints, err = retry.DoWithData(
 		func() ([]*sui_model.Checkpoint, error) {
-			return w.suiIndexer.FetchCheckpoints(ctx, strconv.FormatInt(checkpointIds[0].BlockNumber, 10), strconv.FormatInt(checkpointIds[len(checkpointIds)-1].BlockNumber, 10))
+			var res = make([]*sui_model.Checkpoint, 0)
+
+			newCheckpointIds := lo.Filter(checkpointIds, func(item *entity.BlockStatus, _ int) bool {
+				return item.Status == entity.BlockStatus_NOT_READY
+			})
+			if len(newCheckpointIds) > 0 {
+				newCheckpoints, err := w.suiIndexer.FetchCheckpoints(ctx, strconv.FormatInt(newCheckpointIds[0].BlockNumber, 10), strconv.FormatInt(newCheckpointIds[len(newCheckpointIds)-1].BlockNumber, 10))
+				if err != nil {
+					return nil, err
+				}
+				res = append(res, newCheckpoints...)
+			}
+
+			retryCheckpointIds := lo.Filter(checkpointIds, func(item *entity.BlockStatus, _ int) bool {
+				return item.Status == entity.BlockStatus_FAIL
+			})
+			if len(retryCheckpointIds) > 0 {
+				retryCheckpoints := make([]*sui_model.Checkpoint, 0)
+				for i, item := range retryCheckpointIds {
+					checkpoint, err := w.suiIndexer.FetchCheckpoint(ctx, strconv.FormatInt(item.BlockNumber, 10))
+					if err != nil {
+						return nil, err
+					}
+					retryCheckpoints = append(retryCheckpoints, checkpoint)
+					// cooldown api
+					if i%3 == 0 {
+						time.Sleep(1 * time.Second)
+					}
+				}
+				res = append(res, retryCheckpoints...)
+			}
+
+			return res, nil
 		},
 		// retry configs
 		[]retry.Option{
@@ -246,11 +283,20 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 						parsedEvent := &sui_model.Event{
 							SuiEvent: event,
 						}
+
+						// check in LRU cache if event is already processed
+						// if already process then ignore this event
+						eventKey := fmt.Sprintf("%v-%v", checkpoint.Digest, event.Id.EventSeq.Int64())
+						_, ok := w.cache.Get(eventKey)
+						if ok {
+							continue
+						}
+						w.cache.Add(eventKey, true)
+
 						parsedEvent = parsedEvent.
 							WithDateKey().
 							WithCheckpoint(checkpoint.SequenceNumber).
 							WithGasUsed(gasUsed)
-
 						parsedEvents = append(parsedEvents, parsedEvent)
 
 						checkpointSeq, _ := strconv.ParseInt(checkpoint.SequenceNumber, 10, 64)

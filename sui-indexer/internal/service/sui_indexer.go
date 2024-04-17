@@ -27,13 +27,13 @@ func (svc *SuiIndexer) FetchLatestCheckpoint(ctx context.Context) (string, error
 	return svc.client.GetLatestCheckpointSequenceNumber(ctx)
 }
 
-func (svc *SuiIndexer) FetchCheckpoint(ctx context.Context, id string) (*sui_model.Checkpoint, error) {
+func (svc *SuiIndexer) FetchCheckpoint(ctx context.Context, checkpointId string) (*sui_model.Checkpoint, error) {
 	var resp sui_model.Checkpoint
-	if err := svc.client.CallContext(ctx, &resp, sui_client.SuiMethod("getCheckpoint"), id); err == nil {
+	if err := svc.client.CallContext(ctx, &resp, sui_client.SuiMethod("getCheckpoint"), checkpointId); err == nil {
 		return &resp, nil
 	}
 	// fallback query
-	return &resp, svc.fallbackClient.CallContext(ctx, &resp, sui_client.SuiMethod("getCheckpoint"), id)
+	return &resp, svc.fallbackClient.CallContext(ctx, &resp, sui_client.SuiMethod("getCheckpoint"), checkpointId)
 }
 
 func (svc *SuiIndexer) FetchCheckpoints(ctx context.Context, fromCheckpointId string, toCheckpointId string) ([]*sui_model.Checkpoint, error) {
