@@ -58,7 +58,7 @@ func NewWorker(
 		blockStatusRepo:  blockStatusRepo,
 		baseSvc:          baseSvc,
 		suiIndexer:       service.NewSuiIndexer(client, fallbackClient),
-		cache:            expirable.NewLRU[string, bool](200, nil, 20*time.Second),
+		cache:            expirable.NewLRU[string, bool](500, nil, 60*time.Second),
 		limitCheckpoints: 10, // maximum is 10
 		numWorkers:       3,  // 1 checkpoint/s
 		cooldown:         5 * time.Second,
@@ -285,7 +285,6 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 						}
 
 						// check in LRU cache if event is already processed
-						// if already process then ignore this event
 						eventKey := fmt.Sprintf("%v-%v", checkpoint.Digest, event.Id.EventSeq.Int64())
 						_, ok := w.cache.Get(eventKey)
 						if ok {

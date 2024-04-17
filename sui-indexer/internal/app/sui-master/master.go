@@ -146,7 +146,8 @@ func (m *master) fetchCheckpoint(ctx context.Context) error {
 	}
 
 	var blocks = make([]*entity.BlockStatus, 0)
-	for i := savedCheckpointSeq + 1; i <= latestCheckpointSeq; i++ {
+	// we delay 1 block from latest checkpoint
+	for i := savedCheckpointSeq + 1; i <= latestCheckpointSeq-1; i++ {
 		blocks = append(blocks, &entity.BlockStatus{
 			Chain:       "SUI",
 			BlockNumber: i,
