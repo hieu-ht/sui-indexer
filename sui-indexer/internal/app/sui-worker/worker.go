@@ -285,31 +285,29 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 						}
 
 						// check in LRU cache if event is already processed
-						eventKey := fmt.Sprintf("%v-%v", checkpoint.Digest, event.Id.EventSeq.Int64())
+						eventKey := fmt.Sprintf("%v-%v-%v", checkpoint.SequenceNumber, tx.Digest, event.Id.EventSeq.Int64())
 						_, ok := w.cache.Get(eventKey)
-						if ok {
-							continue
+						if !ok {
+							w.cache.Add(eventKey, true)
+
+							parsedEvent = parsedEvent.
+								WithDateKey().
+								WithCheckpoint(checkpoint.SequenceNumber).
+								WithGasUsed(gasUsed)
+							parsedEvents = append(parsedEvents, parsedEvent)
+
+							checkpointSeq, _ := strconv.ParseInt(checkpoint.SequenceNumber, 10, 64)
+							suiIndex := &entity.SuiIndex{
+								DateKey:          checkpoint.DateKey,
+								CheckpointDigest: checkpoint.Digest,
+								CheckpointSeq:    checkpointSeq,
+								TxDigest:         tx.Digest,
+								EventSeq:         event.Id.EventSeq.Int64(),
+								PackageId:        event.PackageId.String(),
+								EventType:        event.Type,
+							}
+							indices = append(indices, suiIndex)
 						}
-						w.cache.Add(eventKey, true)
-
-						parsedEvent = parsedEvent.
-							WithDateKey().
-							WithCheckpoint(checkpoint.SequenceNumber).
-							WithGasUsed(gasUsed)
-						parsedEvents = append(parsedEvents, parsedEvent)
-
-						checkpointSeq, _ := strconv.ParseInt(checkpoint.SequenceNumber, 10, 64)
-						suiIndex := &entity.SuiIndex{
-							DateKey:          checkpoint.DateKey,
-							CheckpointDigest: checkpoint.Digest,
-							CheckpointSeq:    checkpointSeq,
-							TxDigest:         tx.Digest,
-							EventSeq:         event.Id.EventSeq.Int64(),
-							PackageId:        event.PackageId.String(),
-							EventType:        event.Type,
-						}
-
-						indices = append(indices, suiIndex)
 					}
 				}
 
