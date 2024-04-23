@@ -20,6 +20,7 @@ export interface Token {
 }
 
 export interface Price {
+  name: number;
   price: number;
   decimals: number;
   symbol: string;
