@@ -1,35 +1,95 @@
 import { SuiEvent } from "./type";
 import { processingConfig } from "./main";
+import { suiClient } from "./services/client";
 
-const event: SuiEvent = {
-  id: {
-    txDigest: "4c372pUMi927jfSDc7UjCPmYJRGMhWmwFPkRgVCK7GYE",
-    eventSeq: "1",
+const events: SuiEvent[] = [
+  {
+    id: {
+      txDigest: "5yY69PPqjKw9NXBFsxPKmdVA3CHNokp76ow5BDRiSRHd",
+      eventSeq: "0",
+    },
+    packageId:
+      "0x996c4d9480708fb8b92aa7acf819fb0497b5ec8e65ba06601cae2fb6db3312c3",
+    transactionModule: "pool_script_v2",
+    sender:
+      "0x692853c81afc8f847147c8a8b4368dc894697fc12b929ef3071482d27339815e",
+    type: "0x1eabed72c53feb3805120a081dc15963c204dc8d091542592abaf7a35689b2fb::pool::OpenPositionEvent",
+    parsedJson: {
+      pool: "0xc8d7a1503dc2f9f5b05449a87d8733593e2f0f3e7bffd90541252782e4d2ca20",
+      position:
+        "0x1b3e0c4b02fc0102fae1d710b24b7e5d9a7219d3f3c393e4e7a11fc05d727923",
+      tick_lower: {
+        bits: 2,
+      },
+      tick_upper: {
+        bits: 10,
+      },
+    },
+    timestampMs: "1709796895373",
+    checkpoint: "28116044",
+    dateKey: "",
+    gasUsed: {},
   },
-  packageId:
-    "0x996c4d9480708fb8b92aa7acf819fb0497b5ec8e65ba06601cae2fb6db3312c3",
-  transactionModule: "router",
-  sender: "0x9dd528ea7b5b3dc4c9ed48a387e1264aa3de2e6e2e7737e7a9190cb0e8d5e13e",
-  type: "0x1eabed72c53feb3805120a081dc15963c204dc8d091542592abaf7a35689b2fb::pool::SwapEvent",
-  parsedJson: {
-    after_sqrt_price: "542792116802834413216",
-    amount_in: "3775611",
-    amount_out: "3238884246",
-    atob: true,
-    before_sqrt_price: "543224071962212656123",
-    fee_amount: "37757",
-    partner:
-      "0x0000000000000000000000000000000000000000000000000000000000000000",
-    pool: "0x014abe87a6669bec41edcaa95aab35763466acb26a46d551325b07808f0c59c1",
-    ref_amount: "0",
-    steps: "1",
-    vault_a_amount: "961405340",
-    vault_b_amount: "1308990295130",
+  {
+    id: {
+      txDigest: "5yY69PPqjKw9NXBFsxPKmdVA3CHNokp76ow5BDRiSRHd",
+      eventSeq: "1",
+    },
+    packageId:
+      "0x996c4d9480708fb8b92aa7acf819fb0497b5ec8e65ba06601cae2fb6db3312c3",
+    transactionModule: "pool_script_v2",
+    sender:
+      "0x692853c81afc8f847147c8a8b4368dc894697fc12b929ef3071482d27339815e",
+    type: "0x1eabed72c53feb3805120a081dc15963c204dc8d091542592abaf7a35689b2fb::pool::AddLiquidityEvent",
+    parsedJson: {
+      after_liquidity: "3735093977",
+      amount_a: "493983",
+      amount_b: "1000000",
+      liquidity: "0",
+      pool: "0xc8d7a1503dc2f9f5b05449a87d8733593e2f0f3e7bffd90541252782e4d2ca20",
+      position:
+        "0x1b3e0c4b02fc0102fae1d710b24b7e5d9a7219d3f3c393e4e7a11fc05d727923",
+      tick_lower: {
+        bits: 2,
+      },
+      tick_upper: {
+        bits: 10,
+      },
+    },
+    timestampMs: "1709796895373",
+    checkpoint: "28116044",
+    dateKey: "",
+    gasUsed: {},
   },
-  timestampMs: "10000",
-  dateKey: "123123",
-  checkpoint: "27949512",
-  gasUsed: {},
+];
+
+const txs = ["8AuckC1CXrpCGHLgJBTkuEy2McaKZTu87iZPeD3WvNdA"]; // TODO: This position address is deleted
+
+const test = async () => {
+  const txsEvent = await suiClient.multiGetTransactionBlocks({
+    digests: txs,
+    options: {
+      showEvents: true,
+    },
+  });
+
+  console.log(txsEvent);
+
+  const events = txsEvent.map((item) => {
+    return (item?.events || []).map((event) => {
+      return {
+        ...event,
+        timestampMs: event.timestampMs || "1709796895373",
+        checkpoint: item.checkpoint,
+        dateKey: "",
+        gasUsed: {},
+      };
+    });
+  });
+
+  console.log(events);
+
+  processingConfig.handler(events.flat());
 };
 
-processingConfig.handler([event]);
+test();
