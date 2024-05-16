@@ -3,7 +3,7 @@ import { PROTOCOL } from "./indexer";
 import { prisma } from "../../services/db";
 import { SDK, cetusConfig } from "./init_mainnet";
 import { suiClient } from "../../services/client";
-import { CLMM, SuiContext, TokenState } from "../../interface";
+import { CLMM, Position, SuiContext, TokenState } from "../../interface";
 import {
   ClmmPoolUtil,
   CollectRewarderParams,
@@ -13,6 +13,7 @@ import BN from "bn.js";
 import { INimbusTokenPrice, getNimbusDBPrice, valueConvert } from "../../utils";
 import { getUserContext } from "../context";
 import { TransactionBlock } from "@mysten/sui.js/transactions";
+import { getOrSet } from "../../services/cache";
 
 const toTokenState = (
   balance: string | number,
@@ -29,7 +30,7 @@ const toTokenState = (
 const PACKAGE =
   "0x11ea791d82b5742cc8cab0bf7946035c97d9001d7c3803a93f119753da66f526";
 
-export const getUserPositions = async (
+export const getUserLPPositions = async (
   owner: string,
   { balances, ownedObj }: SuiContext
 ): Promise<CLMM[]> => {
@@ -284,6 +285,191 @@ export const getUserPositions = async (
   );
 
   return lpCurrent;
+};
+
+const getVeNFTDividendInfo = async (nftId, managerId) => {
+  try {
+    const n = await suiClient.getDynamicFieldObject({
+      parentId: managerId,
+      name: {
+        type: "0x2::object::ID",
+        value: nftId,
+      },
+    });
+    return buildVeNFTDividendInfo(n.data?.content.fields);
+  } catch (error) {
+    console.log(error);
+    return;
+  }
+};
+
+const buildVeNFTDividendInfo = (data: any) => {
+  const e = {
+    id: data.id.id,
+    ve_nft_id: data.name,
+    rewards: [] as any[],
+  };
+
+  data.value.fields.value.fields.dividends.fields.contents.forEach((n: any) => {
+    const i = [];
+    n.fields.value.fields.contents.forEach((r: any) => {
+      i.push({
+        coin_type: r.fields.key.fields.name,
+        amount: r.fields.value,
+      });
+    }),
+      e.rewards.push({
+        period: Number(n.fields.key),
+        rewards: i,
+      });
+  });
+
+  return e;
+};
+
+const getDividendManager = async () => {
+  const dividenManager = await suiClient.getObject({
+    id: "0x721c990bfc031d074341c6059a113a59c1febfbd2faeb62d49dcead8408fa6b5",
+    options: {
+      showContent: true,
+    },
+  });
+
+  const e = dividenManager.data?.content.fields as any;
+
+  const t = {
+    id: e.id.id,
+    dividends: {
+      id: e.dividends.fields.id.id,
+      size: e.dividends.fields.size,
+    },
+    venft_dividends: {
+      id: e.venft_dividends.fields.id.id,
+      size: e.venft_dividends.fields.size,
+    },
+    bonus_types: [],
+    start_time: Number(e.start_time),
+    interval_day: Number(e.interval_day),
+    balances: {
+      id: e.balances.fields.id.id,
+      size: e.balances.fields.size,
+    },
+    is_open: e.is_open,
+  };
+
+  e.bonus_types.forEach((n: any) => {
+    t.bonus_types.push("0x" + n.fields.name);
+  });
+
+  return t;
+};
+
+const getUserStakingPositions = async (owner: string, context: SuiContext) => {
+  const lockedCetus = context.ownedObj.filter(
+    (item) =>
+      item.data?.type ===
+      "0x9e69acc50ca03bc943c4f7c5304c2a6002d507b51c11913b247159c60422c606::xcetus::VeNFT"
+  );
+
+  const xCetusPrice = await getNimbusDBPrice(
+    "0x6864a6f921804860930db6ddbe2e16acdf8504495ea7481637a1c8b9a8fe54b::cetus::CETUS",
+    "SUI"
+  );
+
+  const dividenManager = await getOrSet(
+    {
+      protocol: PROTOCOL,
+      key: "getDividendManager",
+      ttl: 5 * 60, // 5 mins
+    },
+    () => getDividendManager()
+  );
+
+  const result = await Promise.all(
+    lockedCetus.map(async (item) => {
+      const result = await getVeNFTDividendInfo(
+        item.data?.objectId,
+        dividenManager.venft_dividends.id
+      );
+
+      const rewards = result?.rewards.map((item) => item.rewards).flat();
+      const rewardsByType = groupBy(rewards, (item) => item.coin_type);
+
+      const rewardsPrice = await Promise.all(
+        Object.keys(rewardsByType).map((type) => {
+          return getNimbusDBPrice("0x" + type, "SUI");
+        })
+      );
+
+      const yieldReward = Object.keys(rewardsByType).map((type, index) => {
+        const price = rewardsPrice[index];
+        const balance = rewardsByType[type].reduce(
+          (prev, cur) => prev + BigInt(cur.amount),
+          0n
+        );
+        const amount = Number(valueConvert(balance, price.decimals || 9));
+        return {
+          amount,
+          value: amount * price.price,
+          token: price,
+        };
+      });
+
+      const balance = item.data?.content.fields?.xcetus_balance;
+
+      const amount = Number(valueConvert(balance || 0, 9));
+
+      return {
+        positionId: "xCetus",
+        type: "Stake",
+        owner,
+        input: [
+          {
+            amount: amount,
+            value: 0,
+            token: xCetusPrice,
+          },
+        ],
+        yieldCollected: [],
+        current: {
+          tokens: [
+            {
+              amount: amount,
+              value: amount * xCetusPrice.price,
+              token: xCetusPrice,
+            },
+          ],
+          yield: yieldReward,
+        },
+        fee: {
+          value: 0,
+        },
+        chain: "SUI",
+        meta: {
+          protocol: {
+            name: PROTOCOL,
+            logo: "",
+            url: "",
+          },
+          url: "", // TODO:
+        },
+      };
+    })
+  );
+
+  return result;
+};
+
+export const getUserPositions = async (
+  owner: string,
+  suiCtx: SuiContext
+): Promise<Position> => {
+  const result = await Promise.all([
+    // getUserLPPositions(owner, suiCtx),
+    getUserStakingPositions(owner, suiCtx),
+  ]);
+
+  return result.flat();
 };
 
 const test = async () => {
