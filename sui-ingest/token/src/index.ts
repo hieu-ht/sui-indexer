@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { kafkaClient } from "./services/kafka";
 import {
   EventHandler,

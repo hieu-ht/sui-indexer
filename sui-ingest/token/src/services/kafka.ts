@@ -6,7 +6,8 @@ CompressionCodecs[CompressionTypes.Snappy] = SnappyCodec;
 export const kafkaClient = new Kafka({
   clientId: "nimbus-sui-indexer",
   brokers: String(
-    process.env.KAFKA_BROKERS || "redpanda-cluster.getnimbus.xyz:19092"
+    process.env.KAFKA_BROKERS ||
+      "internal.background-service.getnimbus.xyz:19092"
   ).split(","),
 });
 
