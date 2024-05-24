@@ -2,6 +2,7 @@ package sui_worker
 
 import (
 	"context"
+	"feng-sui-core/pkg/alert"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -61,7 +62,7 @@ func NewWorker(
 		suiIndexer:       service.NewSuiIndexer(client, fallbackClient),
 		cache:            expirable.NewLRU[string, bool](500, nil, 50*time.Second),
 		limitCheckpoints: 5, // maximum is 5
-		numWorkers:       10,
+		numWorkers:       20,
 		cooldown:         3 * time.Second,
 		checkpointsTopic: conf.Config.SuiCheckpointsTopic,
 		txsTopic:         conf.Config.SuiTxsTopic,
@@ -238,7 +239,8 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 			defer wg.Done()
 
 			var fetchDataErr = func() error {
-				chunkTxDigests := lo.Chunk(checkpoint.Transactions, 10)
+				uniqueTxs := lo.Uniq(checkpoint.Transactions)
+				chunkTxDigests := lo.Chunk(uniqueTxs, 20)
 				for _, txDigests := range chunkTxDigests {
 					txs, err := retry.DoWithData(
 						func() ([]*sui_model.Transaction, error) {
@@ -255,6 +257,7 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 						}...,
 					)
 					if err != nil {
+						alert.AlertDiscord(ctx, fmt.Sprintf("[sui-indexer] failed to fetch txs: %v", err))
 						return err
 					}
 					if err := checkpoint.SetBloomFilter(txs); err != nil {

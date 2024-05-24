@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"feng-sui-core/pkg/alert"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -60,7 +61,7 @@ func NewWorker(
 		s3Svc:            s3Svc,
 		suiIndexer:       service.NewSuiIndexer(client, fallbackClient),
 		limitCheckpoints: 5, // maximum is 5
-		numWorkers:       10,
+		numWorkers:       20,
 		cooldown:         1 * time.Second,
 		indexTopic:       conf.Config.SuiIndexTopic,
 	}, nil
@@ -212,7 +213,8 @@ func (w *worker) fetchTxs(ctx context.Context, checkpointCh chan<- *sui_model.Ch
 			defer wg.Done()
 
 			var fetchDataErr = func() error {
-				chunkTxDigests := lo.Chunk(checkpoint.Transactions, 10)
+				uniqueTxs := lo.Uniq(checkpoint.Transactions)
+				chunkTxDigests := lo.Chunk(uniqueTxs, 20)
 				for _, txDigests := range chunkTxDigests {
 					txs, err := retry.DoWithData(
 						func() ([]*sui_model.Transaction, error) {
@@ -229,6 +231,7 @@ func (w *worker) fetchTxs(ctx context.Context, checkpointCh chan<- *sui_model.Ch
 						}...,
 					)
 					if err != nil {
+						alert.AlertDiscord(ctx, fmt.Sprintf("[sui-indexer] failed to fetch txs: %v", err))
 						return err
 					}
 					if err := checkpoint.SetBloomFilter(txs); err != nil {
