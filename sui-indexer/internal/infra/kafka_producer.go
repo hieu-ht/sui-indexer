@@ -23,7 +23,7 @@ func NewKafkaSyncProducer(ctx context.Context) (KafkaSyncProducer, func(), error
 	// as fast as possible to keep latency low.
 	brokers := strings.Split(conf.Config.KafkaBrokers, ",")
 	if len(brokers) == 0 {
-		return nil, nil, fmt.Errorf("missing env POSTBACK_KAFKA_BROKERS")
+		return nil, nil, fmt.Errorf("missing env KAFKA_BROKERS")
 	}
 
 	kafkaConfig := sarama.NewConfig()
@@ -73,7 +73,7 @@ func NewKafkaAsyncProducer(ctx context.Context) (KafkaAsyncProducer, func(), err
 	// By creating batches of compressed messages, we reduce network I/O at a cost of more latency.
 	brokers := strings.Split(conf.Config.KafkaBrokers, ",")
 	if len(brokers) == 0 {
-		return nil, nil, fmt.Errorf("missing env POSTBACK_KAFKA_BROKERS")
+		return nil, nil, fmt.Errorf("missing env KAFKA_BROKERS")
 	}
 
 	kafkaConfig := sarama.NewConfig()
@@ -129,7 +129,7 @@ func NewKafkaTxProducer(ctx context.Context) (KafkaTxProducer, func(), error) {
 
 	brokers := strings.Split(conf.Config.KafkaBrokers, ",")
 	if len(brokers) == 0 {
-		return nil, nil, fmt.Errorf("missing env POSTBACK_KAFKA_BROKERS")
+		return nil, nil, fmt.Errorf("missing env KAFKA_BROKERS")
 	}
 
 	logger.Info("[KafkaTxProducer] start tx producer")

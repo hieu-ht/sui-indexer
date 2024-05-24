@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/avast/retry-go/v4"
@@ -58,10 +59,10 @@ func NewWorker(
 		blockStatusRepo:  blockStatusRepo,
 		baseSvc:          baseSvc,
 		suiIndexer:       service.NewSuiIndexer(client, fallbackClient),
-		cache:            expirable.NewLRU[string, bool](500, nil, 60*time.Second),
-		limitCheckpoints: 10, // maximum is 10
-		numWorkers:       3,  // 1 checkpoint/s
-		cooldown:         5 * time.Second,
+		cache:            expirable.NewLRU[string, bool](500, nil, 50*time.Second),
+		limitCheckpoints: 5, // maximum is 5
+		numWorkers:       10,
+		cooldown:         3 * time.Second,
 		checkpointsTopic: conf.Config.SuiCheckpointsTopic,
 		txsTopic:         conf.Config.SuiTxsTopic,
 		eventsTopic:      conf.Config.SuiEventsTopic,
@@ -117,32 +118,19 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 	ctx, logger := u_logger.GetLogger(ctx)
 	logger.Info("waiting query from db...")
 
-	var (
-		checkpointIds []*entity.BlockStatus
-		err           error
-	)
+	var blockStatuses []*entity.BlockStatus
 
 	// recover panic
 	defer func() {
 		if re := recover(); re != nil {
 			logger.Infof("panic: %v", re)
 			// update status FAIL
-			w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, checkpointIds...)
+			w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, blockStatuses...)
 			return
 		}
 	}()
 
-	defer func() {
-		if err != nil {
-			// update status FAIL
-			w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, checkpointIds...)
-			return
-		}
-		// update status DONE
-		w.updateCheckpointStatus(ctx, entity.BlockStatus_DONE, checkpointIds...)
-	}()
-
-	err = w.baseSvc.ExecTx(ctx, func(txCtx context.Context) error {
+	var dbErr = w.baseSvc.ExecTx(ctx, func(txCtx context.Context) error {
 		scopes := []func(db *gorm.DB) *gorm.DB{
 			w.blockStatusRepo.S().Locking(),
 			w.blockStatusRepo.S().FilterStatuses(
@@ -155,29 +143,30 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 			w.blockStatusRepo.S().SortBy("block_number", "ASC"),
 		}
 
-		checkpointIds, err = w.blockStatusRepo.GetList(txCtx, scopes...)
+		var err error
+		blockStatuses, err = w.blockStatusRepo.GetList(txCtx, scopes...)
 		if err != nil {
 			return err
 		}
 
 		// update block status PROCESSING
-		return w.updateCheckpointStatus(txCtx, entity.BlockStatus_PROCESSING, checkpointIds...)
+		return w.updateCheckpointStatus(txCtx, entity.BlockStatus_PROCESSING, blockStatuses...)
 	})
-	if err != nil {
-		logger.Errorf("failed to fetch checkpoint ids: %v", err)
-		return fmt.Errorf("failed to fetch checkpoint ids: %v", err)
-	}
-
-	if len(checkpointIds) == 0 {
+	if dbErr != nil {
+		logger.Errorf("failed to fetch block status from db: %v", dbErr)
+		// update status FAIL
+		w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, blockStatuses...)
+		return fmt.Errorf("failed to fetch block status from db: %v", dbErr)
+	} else if len(blockStatuses) == 0 {
+		logger.Warnf("not found any new blocks in db")
 		return nil
 	}
 
-	var checkpoints []*sui_model.Checkpoint
-	checkpoints, err = retry.DoWithData(
+	checkpoints, err := retry.DoWithData(
 		func() ([]*sui_model.Checkpoint, error) {
 			var res = make([]*sui_model.Checkpoint, 0)
 
-			newCheckpointIds := lo.Filter(checkpointIds, func(item *entity.BlockStatus, _ int) bool {
+			newCheckpointIds := lo.Filter(blockStatuses, func(item *entity.BlockStatus, _ int) bool {
 				return item.Status == entity.BlockStatus_NOT_READY
 			})
 			if len(newCheckpointIds) > 0 {
@@ -188,7 +177,7 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 				res = append(res, newCheckpoints...)
 			}
 
-			retryCheckpointIds := lo.Filter(checkpointIds, func(item *entity.BlockStatus, _ int) bool {
+			retryCheckpointIds := lo.Filter(blockStatuses, func(item *entity.BlockStatus, _ int) bool {
 				return item.Status == entity.BlockStatus_FAIL
 			})
 			if len(retryCheckpointIds) > 0 {
@@ -220,159 +209,182 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 		}...,
 	)
 	if err != nil {
-		logger.Errorf("failed to fetch checkpoint from %v: %v", checkpointIds[0].BlockNumber, err)
-		return fmt.Errorf("failed to fetch checkpoint from %v: %v", checkpointIds[0].BlockNumber, err)
+		logger.Errorf("failed to fetch checkpoint from %v: %v", blockStatuses[0].BlockNumber, err)
+		// if node rpc has some errors so that it cannot return checkpoints => update status to failed
+		// update status FAIL
+		w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, blockStatuses...)
+		return fmt.Errorf("failed to fetch checkpoint from %v: %v", blockStatuses[0].BlockNumber, err)
 	}
 
-	eg, childCtx := errgroup.WithContext(ctx)
+	var wg sync.WaitGroup
 	for _, c := range checkpoints {
+		wg.Add(1)
 		checkpoint := c.WithDateKey()
+		blockStatus, ok := lo.Find(blockStatuses, func(item *entity.BlockStatus) bool {
+			return strconv.FormatInt(item.BlockNumber, 10) == checkpoint.SequenceNumber
+		})
+		if !ok {
+			logger.Warnf("not found sequence number of checkpoint in block status")
+			continue
+		}
 		if err := checkpoint.Validate(); err != nil {
-			logger.Warnf("invalid checkpoint: %v", err)
+			logger.Errorf("invalid checkpoint: %v", err)
+			// update status FAIL
+			w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, blockStatus)
 			continue
 		}
 
-		eg.Go(func() error {
-			chunkTxDigests := lo.Chunk(checkpoint.Transactions, 30)
-			for _, txDigests := range chunkTxDigests {
-				txs, err := retry.DoWithData(
-					func() ([]*sui_model.Transaction, error) {
-						return w.suiIndexer.FetchTxs(childCtx, txDigests...)
-					},
-					// retry configs
-					[]retry.Option{
-						retry.Attempts(uint(5)),
-						retry.OnRetry(func(n uint, err error) {
-							logger.Errorf("Retry invoke function %d to and get error: %v", n+1, err)
-						}),
-						retry.Delay(3 * time.Second),
-						retry.Context(childCtx),
-					}...,
-				)
-				if err != nil {
-					return err
-				}
-				if err := checkpoint.SetBloomFilter(txs); err != nil {
-					return err
-				}
+		go func() {
+			defer wg.Done()
 
-				var (
-					parsedTxs    = make([]*sui_model.Transaction, 0)
-					parsedEvents = make([]*sui_model.Event, 0)
-					indices      = make([]*entity.SuiIndex, 0)
-				)
-				for _, tx := range txs {
-					if err := tx.Validate(); err != nil {
-						logger.Warnf("invalid tx: %v", err)
-						continue
+			var fetchDataErr = func() error {
+				chunkTxDigests := lo.Chunk(checkpoint.Transactions, 10)
+				for _, txDigests := range chunkTxDigests {
+					txs, err := retry.DoWithData(
+						func() ([]*sui_model.Transaction, error) {
+							return w.suiIndexer.FetchTxs(ctx, txDigests...)
+						},
+						// retry configs
+						[]retry.Option{
+							retry.Attempts(uint(5)),
+							retry.OnRetry(func(n uint, err error) {
+								logger.Errorf("Retry invoke function %d to and get error: %v", n+1, err)
+							}),
+							retry.Delay(3 * time.Second),
+							retry.Context(ctx),
+						}...,
+					)
+					if err != nil {
+						return err
 					}
-					parsedTxs = append(parsedTxs, tx.WithDateKey())
+					if err := checkpoint.SetBloomFilter(txs); err != nil {
+						return err
+					}
 
-					// extract tx gasUsed for events
-					gasUsed := tx.Effects["gasUsed"]
-					for _, event := range tx.Events {
-						if event.TimestampMs == nil || event.TimestampMs.Int64() == 0 {
-							parsedTs, err := strconv.ParseUint(tx.TimestampMs, 10, 64)
-							if err != nil {
-								logger.Errorf("failed to parse timestamp: %v", err)
+					var (
+						parsedTxs    = make([]*sui_model.Transaction, 0)
+						parsedEvents = make([]*sui_model.Event, 0)
+						indices      = make([]*entity.SuiIndex, 0)
+					)
+					for _, tx := range txs {
+						if err := tx.Validate(); err != nil {
+							logger.Errorf("invalid tx: %v", err)
+							return fmt.Errorf("invalid tx: %v", err)
+						}
+						parsedTxs = append(parsedTxs, tx.WithDateKey())
+
+						// extract tx gasUsed for events
+						gasUsed := tx.Effects["gasUsed"]
+						for _, event := range tx.Events {
+							if event.TimestampMs == nil || event.TimestampMs.Int64() == 0 {
+								parsedTs, err := strconv.ParseUint(tx.TimestampMs, 10, 64)
+								if err != nil {
+									logger.Errorf("failed to parse timestamp: %v", err)
+									return err
+								}
+								ts := types.NewSafeSuiBigInt[uint64](parsedTs)
+								event.TimestampMs = &ts
+							}
+							parsedEvent := &sui_model.Event{
+								SuiEvent: event,
+							}
+
+							// check in LRU cache if event is already processed
+							eventKey := fmt.Sprintf("%v-%v-%v", checkpoint.SequenceNumber, tx.Digest, event.Id.EventSeq.Int64())
+							_, ok := w.cache.Get(eventKey)
+							if !ok {
+								w.cache.Add(eventKey, true)
+
+								parsedEvent = parsedEvent.
+									WithDateKey().
+									WithCheckpoint(checkpoint.SequenceNumber).
+									WithGasUsed(gasUsed)
+								parsedEvents = append(parsedEvents, parsedEvent)
+
+								checkpointSeq, _ := strconv.ParseInt(checkpoint.SequenceNumber, 10, 64)
+								suiIndex := &entity.SuiIndex{
+									DateKey:          checkpoint.DateKey,
+									CheckpointDigest: checkpoint.Digest,
+									CheckpointSeq:    checkpointSeq,
+									TxDigest:         tx.Digest,
+									EventSeq:         event.Id.EventSeq.Int64(),
+									PackageId:        event.PackageId.String(),
+									EventType:        event.Type,
+								}
+								indices = append(indices, suiIndex)
+							}
+						}
+					}
+
+					eg, childCtx := errgroup.WithContext(ctx)
+					// send txs to kafka
+					eg.Go(func() error {
+						for _, tx := range parsedTxs {
+							if err := w.kafkaProducer.SendJson(childCtx, w.txsTopic, tx); err != nil {
+								logger.Errorf("failed to send payload to kafka sui txs topic: %v", err)
 								return err
 							}
-							ts := types.NewSafeSuiBigInt[uint64](parsedTs)
-							event.TimestampMs = &ts
 						}
-						parsedEvent := &sui_model.Event{
-							SuiEvent: event,
-						}
+						return nil
+					})
 
-						// check in LRU cache if event is already processed
-						eventKey := fmt.Sprintf("%v-%v-%v", checkpoint.SequenceNumber, tx.Digest, event.Id.EventSeq.Int64())
-						_, ok := w.cache.Get(eventKey)
-						if !ok {
-							w.cache.Add(eventKey, true)
-
-							parsedEvent = parsedEvent.
-								WithDateKey().
-								WithCheckpoint(checkpoint.SequenceNumber).
-								WithGasUsed(gasUsed)
-							parsedEvents = append(parsedEvents, parsedEvent)
-
-							checkpointSeq, _ := strconv.ParseInt(checkpoint.SequenceNumber, 10, 64)
-							suiIndex := &entity.SuiIndex{
-								DateKey:          checkpoint.DateKey,
-								CheckpointDigest: checkpoint.Digest,
-								CheckpointSeq:    checkpointSeq,
-								TxDigest:         tx.Digest,
-								EventSeq:         event.Id.EventSeq.Int64(),
-								PackageId:        event.PackageId.String(),
-								EventType:        event.Type,
+					// send events to kafka
+					eg.Go(func() error {
+						for _, event := range parsedEvents {
+							if err := w.kafkaProducer.SendJson(childCtx, w.eventsTopic, event); err != nil {
+								logger.Errorf("failed to send payload to kafka sui events topic: %v", err)
+								return err
 							}
-							indices = append(indices, suiIndex)
 						}
+						return nil
+					})
+
+					// send sui index to kafka
+					eg.Go(func() error {
+						for _, index := range indices {
+							if err := w.kafkaProducer.SendJson(
+								childCtx,
+								w.indexTopic,
+								index.ToKafka(),
+							); err != nil {
+								logger.Errorf("failed to send payload to kafka sui index topic: %v", err)
+								return err
+							}
+						}
+						return nil
+					})
+
+					// send checkpoints to kafka
+					eg.Go(func() error {
+						if checkpoint != nil {
+							if err := w.kafkaProducer.SendJson(childCtx, w.checkpointsTopic, checkpoint); err != nil {
+								logger.Errorf("failed to send payload to kafka sui checkpoints topic: %v", err)
+								return err
+							}
+						}
+						return nil
+					})
+
+					if err := eg.Wait(); err != nil {
+						return err
 					}
 				}
-
-				eg2, childCtx2 := errgroup.WithContext(childCtx)
-				// send txs to kafka
-				eg2.Go(func() error {
-					for _, tx := range parsedTxs {
-						if err := w.kafkaProducer.SendJson(childCtx2, w.txsTopic, tx); err != nil {
-							logger.Errorf("failed to send payload to kafka sui txs topic: %v", err)
-							return err
-						}
-					}
-					return nil
-				})
-
-				// send events to kafka
-				eg2.Go(func() error {
-					for _, event := range parsedEvents {
-						if err := w.kafkaProducer.SendJson(childCtx2, w.eventsTopic, event); err != nil {
-							logger.Errorf("failed to send payload to kafka sui events topic: %v", err)
-							return err
-						}
-					}
-					return nil
-				})
-
-				// send sui index to kafka
-				eg2.Go(func() error {
-					for _, index := range indices {
-						if err := w.kafkaProducer.SendJson(
-							childCtx2,
-							w.indexTopic,
-							index.ToKafka(),
-						); err != nil {
-							logger.Errorf("failed to send payload to kafka sui index topic: %v", err)
-							return err
-						}
-					}
-					return nil
-				})
-
-				// send checkpoints to kafka
-				eg2.Go(func() error {
-					if checkpoint != nil {
-						if err := w.kafkaProducer.SendJson(childCtx2, w.checkpointsTopic, checkpoint); err != nil {
-							logger.Errorf("failed to send payload to kafka sui checkpoints topic: %v", err)
-							return err
-						}
-					}
-					return nil
-				})
-
-				if err := eg2.Wait(); err != nil {
-					return err
-				}
+				return nil
+			}()
+			if fetchDataErr != nil {
+				logger.Errorf("failed to fetch txs: %v", fetchDataErr)
+				// update status FAIL
+				w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, blockStatus)
+				return
 			}
-			return nil
-		})
+			// update status DONE
+			w.updateCheckpointStatus(ctx, entity.BlockStatus_DONE, blockStatus)
+		}()
 	}
 
-	err = eg.Wait()
-	if err != nil {
-		logger.Errorf("failed to fetch txs from checkpoint %v: %v", checkpointIds[0].BlockNumber, err)
-		return fmt.Errorf("failed to fetch txs from checkpoint %v: %v", checkpointIds[0].BlockNumber, err)
-	}
+	// wait for all workers to finish
+	wg.Wait()
+
 	return nil
 }
 

@@ -48,10 +48,10 @@ func (c *cronjob) Start(ctx context.Context) error {
 	}
 	defer func() { _ = s.Shutdown() }()
 
-	// update checkpoint status PENDING to FAIL if exceed 1 hour
+	// update checkpoint status PENDING to FAIL if exceed 30 mins
 	j1, err := s.NewJob(
 		gocron.CronJob(
-			"0 * * * *",
+			"*/30 * * * *",
 			false,
 		),
 		gocron.NewTask(
@@ -127,13 +127,13 @@ func (c *cronjob) Start(ctx context.Context) error {
 	// compress sui data in S3 using Athena
 	j3, err := s.NewJob(
 		gocron.CronJob(
-			"30 0 * * *",
+			"0 0 * * *",
 			false,
 		),
 		gocron.NewTask(
 			func() {
 				logger.Info("start compress sui data in S3...")
-				runningDate := carbon.Now(carbon.UTC).SubDays(1).StartOfDay().ToStdTime()
+				runningDate := carbon.Now(carbon.UTC).SubDays(2).StartOfDay().ToStdTime()
 				if err := c.compressionSvc.CompressData(ctx, runningDate, true); err != nil {
 					alert.AlertDiscord(ctx, fmt.Sprintf("[%s] failed to compressed sui data in S3: %v", runningDate, err))
 				}

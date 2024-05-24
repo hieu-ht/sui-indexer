@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/alitto/pond"
@@ -58,7 +59,7 @@ func NewWorker(
 		baseSvc:          baseSvc,
 		s3Svc:            s3Svc,
 		suiIndexer:       service.NewSuiIndexer(client, fallbackClient),
-		limitCheckpoints: 20,
+		limitCheckpoints: 5, // maximum is 5
 		numWorkers:       10,
 		cooldown:         1 * time.Second,
 		indexTopic:       conf.Config.SuiIndexTopic,
@@ -123,32 +124,19 @@ func (w *worker) fetchTxs(ctx context.Context, checkpointCh chan<- *sui_model.Ch
 	ctx, logger := u_logger.GetLogger(ctx)
 	logger.Info("waiting query from db...")
 
-	var (
-		checkpointIds []*entity.BlockStatus
-		err           error
-	)
+	var blockStatuses []*entity.BlockStatus
 
 	// recover panic
 	defer func() {
 		if re := recover(); re != nil {
 			logger.Infof("panic: %v", re)
 			// update status FAIL
-			w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, checkpointIds...)
+			w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, blockStatuses...)
 			return
 		}
 	}()
 
-	defer func() {
-		if err != nil {
-			// update status FAIL
-			w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, checkpointIds...)
-			return
-		}
-		// update status DONE
-		w.updateCheckpointStatus(ctx, entity.BlockStatus_DONE, checkpointIds...)
-	}()
-
-	err = w.baseSvc.ExecTx(ctx, func(txCtx context.Context) error {
+	var dbErr = w.baseSvc.ExecTx(ctx, func(txCtx context.Context) error {
 		scopes := []func(db *gorm.DB) *gorm.DB{
 			w.blockStatusRepo.S().Locking(),
 			w.blockStatusRepo.S().FilterStatuses(
@@ -160,26 +148,29 @@ func (w *worker) fetchTxs(ctx context.Context, checkpointCh chan<- *sui_model.Ch
 			w.blockStatusRepo.S().Limit(w.limitCheckpoints),
 			w.blockStatusRepo.S().SortBy("block_number", "ASC"),
 		}
-		checkpointIds, err = w.blockStatusRepo.GetList(txCtx, scopes...)
+
+		var err error
+		blockStatuses, err = w.blockStatusRepo.GetList(txCtx, scopes...)
 		if err != nil {
 			return err
 		}
 
 		// update block status PROCESSING
-		return w.updateCheckpointStatus(txCtx, entity.BlockStatus_PROCESSING, checkpointIds...)
+		return w.updateCheckpointStatus(txCtx, entity.BlockStatus_PROCESSING, blockStatuses...)
 	})
-	if err != nil {
-		logger.Errorf("failed to fetch checkpoint ids: %v", err)
-		return fmt.Errorf("failed to fetch checkpoint ids: %v", err)
-	}
-	if len(checkpointIds) == 0 {
+	if dbErr != nil {
+		logger.Errorf("failed to fetch block status from db: %v", dbErr)
+		// update status FAIL
+		w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, blockStatuses...)
+		return fmt.Errorf("failed to fetch block status from db: %v", dbErr)
+	} else if len(blockStatuses) == 0 {
+		logger.Warnf("not found any new blocks in db")
 		return nil
 	}
 
-	var checkpoints []*sui_model.Checkpoint
-	checkpoints, err = retry.DoWithData(
+	checkpoints, err := retry.DoWithData(
 		func() ([]*sui_model.Checkpoint, error) {
-			return w.suiIndexer.FetchCheckpoints(ctx, strconv.FormatInt(checkpointIds[0].BlockNumber, 10), strconv.FormatInt(checkpointIds[len(checkpointIds)-1].BlockNumber, 10))
+			return w.suiIndexer.FetchCheckpoints(ctx, strconv.FormatInt(blockStatuses[0].BlockNumber, 10), strconv.FormatInt(blockStatuses[len(blockStatuses)-1].BlockNumber, 10))
 		},
 		// retry configs
 		[]retry.Option{
@@ -192,70 +183,93 @@ func (w *worker) fetchTxs(ctx context.Context, checkpointCh chan<- *sui_model.Ch
 		}...,
 	)
 	if err != nil {
-		logger.Errorf("failed to fetch checkpoint from %v: %v", checkpointIds[0].BlockNumber, err)
-		return fmt.Errorf("failed to fetch checkpoint from %v: %v", checkpointIds[0].BlockNumber, err)
+		logger.Errorf("failed to fetch checkpoint from %v: %v", blockStatuses[0].BlockNumber, err)
+		// if node rpc has some errors so that it cannot return checkpoints => update status to failed
+		// update status FAIL
+		w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, blockStatuses...)
+		return fmt.Errorf("failed to fetch checkpoint from %v: %v", blockStatuses[0].BlockNumber, err)
 	}
 
-	eg, childCtx := errgroup.WithContext(ctx)
+	var wg sync.WaitGroup
 	for _, c := range checkpoints {
+		wg.Add(1)
 		checkpoint := c.WithDateKey()
+		blockStatus, ok := lo.Find(blockStatuses, func(item *entity.BlockStatus) bool {
+			return strconv.FormatInt(item.BlockNumber, 10) == checkpoint.SequenceNumber
+		})
+		if !ok {
+			logger.Warnf("not found sequence number of checkpoint in block status")
+			continue
+		}
 		if err := checkpoint.Validate(); err != nil {
-			logger.Warnf("invalid checkpoint: %v", err)
+			logger.Errorf("invalid checkpoint: %v", err)
+			// update status FAIL
+			w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, blockStatus)
 			continue
 		}
 
-		eg.Go(func() error {
-			chunkTxDigests := lo.Chunk(checkpoint.Transactions, 30)
-			for _, txDigests := range chunkTxDigests {
-				txs, err := retry.DoWithData(
-					func() ([]*sui_model.Transaction, error) {
-						return w.suiIndexer.FetchTxs(childCtx, txDigests...)
-					},
-					// retry configs
-					[]retry.Option{
-						retry.Attempts(uint(5)),
-						retry.OnRetry(func(n uint, err error) {
-							logger.Errorf("Retry invoke function %d to and get error: %v", n+1, err)
-						}),
-						retry.Delay(3 * time.Second),
-						retry.Context(childCtx),
-					}...,
-				)
-				if err != nil {
-					return err
-				}
-				if err := checkpoint.SetBloomFilter(txs); err != nil {
-					return err
-				}
+		go func() {
+			defer wg.Done()
 
-				var parsedTxs = make([]*sui_model.Transaction, 0)
-				for _, tx := range txs {
-					if err := tx.Validate(); err != nil {
-						logger.Warnf("invalid tx: %v", err)
-						continue
+			var fetchDataErr = func() error {
+				chunkTxDigests := lo.Chunk(checkpoint.Transactions, 10)
+				for _, txDigests := range chunkTxDigests {
+					txs, err := retry.DoWithData(
+						func() ([]*sui_model.Transaction, error) {
+							return w.suiIndexer.FetchTxs(ctx, txDigests...)
+						},
+						// retry configs
+						[]retry.Option{
+							retry.Attempts(uint(5)),
+							retry.OnRetry(func(n uint, err error) {
+								logger.Errorf("Retry invoke function %d to and get error: %v", n+1, err)
+							}),
+							retry.Delay(3 * time.Second),
+							retry.Context(ctx),
+						}...,
+					)
+					if err != nil {
+						return err
 					}
-					parsedTxs = append(parsedTxs, tx.WithDateKey())
-				}
+					if err := checkpoint.SetBloomFilter(txs); err != nil {
+						return err
+					}
 
-				// send txs to kafka
-				if len(parsedTxs) > 0 {
-					txsCh <- parsedTxs
-				}
+					var parsedTxs = make([]*sui_model.Transaction, 0)
+					for _, tx := range txs {
+						if err := tx.Validate(); err != nil {
+							logger.Errorf("invalid tx: %v", err)
+							return fmt.Errorf("invalid tx: %v", err)
+						}
+						parsedTxs = append(parsedTxs, tx.WithDateKey())
+					}
 
-				// send checkpoints to kafka
-				if checkpoint != nil {
-					checkpointCh <- checkpoint
+					// send txs to kafka
+					if len(parsedTxs) > 0 {
+						txsCh <- parsedTxs
+					}
+
+					// send checkpoints to kafka
+					if checkpoint != nil {
+						checkpointCh <- checkpoint
+					}
 				}
+				return nil
 			}
-			return nil
-		})
+			if fetchDataErr != nil {
+				logger.Errorf("failed to fetch txs: %v", fetchDataErr)
+				// update status FAIL
+				w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, blockStatus)
+				return
+			}
+			// update status DONE
+			w.updateCheckpointStatus(ctx, entity.BlockStatus_DONE, blockStatus)
+		}()
 	}
 
-	err = eg.Wait()
-	if err != nil {
-		logger.Errorf("failed to fetch txs from checkpoint %v: %v", checkpointIds[0].BlockNumber, err)
-		return fmt.Errorf("failed to fetch txs from checkpoint %v: %v", checkpointIds[0].BlockNumber, err)
-	}
+	// wait for all workers to finish
+	wg.Wait()
+
 	return nil
 }
 
