@@ -4,7 +4,6 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
-	"feng-sui-core/pkg/alert"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -25,6 +24,7 @@ import (
 	"feng-sui-core/internal/entity_dto/sui_model"
 	"feng-sui-core/internal/repo"
 	"feng-sui-core/internal/service"
+	"feng-sui-core/pkg/alert"
 )
 
 func NewWorker(
@@ -193,7 +193,6 @@ func (w *worker) fetchTxs(ctx context.Context, checkpointCh chan<- *sui_model.Ch
 
 	var wg sync.WaitGroup
 	for _, c := range checkpoints {
-		wg.Add(1)
 		checkpoint := c.WithDateKey()
 		blockStatus, ok := lo.Find(blockStatuses, func(item *entity.BlockStatus) bool {
 			return strconv.FormatInt(item.BlockNumber, 10) == checkpoint.SequenceNumber
@@ -209,6 +208,7 @@ func (w *worker) fetchTxs(ctx context.Context, checkpointCh chan<- *sui_model.Ch
 			continue
 		}
 
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
 
