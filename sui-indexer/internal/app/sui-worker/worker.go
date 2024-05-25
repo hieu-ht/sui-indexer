@@ -2,6 +2,7 @@ package sui_worker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -257,7 +258,9 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 						}...,
 					)
 					if err != nil {
-						alert.AlertDiscord(ctx, fmt.Sprintf("[sui-indexer] failed to fetch txs: %v", err))
+						if !errors.Is(err, context.Canceled) {
+							alert.AlertDiscord(ctx, fmt.Sprintf("[sui-indexer] failed to fetch txs: %v", err))
+						}
 						return err
 					}
 					if err := checkpoint.SetBloomFilter(txs); err != nil {

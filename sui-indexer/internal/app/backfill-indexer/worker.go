@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -231,7 +232,9 @@ func (w *worker) fetchTxs(ctx context.Context, checkpointCh chan<- *sui_model.Ch
 						}...,
 					)
 					if err != nil {
-						alert.AlertDiscord(ctx, fmt.Sprintf("[sui-indexer] failed to fetch txs: %v", err))
+						if !errors.Is(err, context.Canceled) {
+							alert.AlertDiscord(ctx, fmt.Sprintf("[sui-indexer] failed to fetch txs: %v", err))
+						}
 						return err
 					}
 					if err := checkpoint.SetBloomFilter(txs); err != nil {
