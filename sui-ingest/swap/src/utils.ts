@@ -505,12 +505,12 @@ export const tryCatchFn =
 
 export const parsePoolToken = (poolType: string) => {
   //0x1eabed72c53feb3805120a081dc15963c204dc8d091542592abaf7a35689b2fb::pool::Pool<0x5d4b302506645c37ff133b98c4b50a5ae14841659738d6d733d59d0d217a93bf::coin::COIN, 0x2::sui::SUI>
-  const data = poolType.match(/<(.*), (.*)>/);
+  const data = poolType?.match(/<(.*), (.*)>/);
   return [data?.[1] || "", data?.[2] || ""];
 };
 
 export const parseWrapperObj = (type: string) => {
-  const data = type.match(/<(.*)>/);
+  const data = type?.match(/<(.*)>/);
   return data?.[1] || "";
 };
 
