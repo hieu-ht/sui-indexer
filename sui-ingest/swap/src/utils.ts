@@ -1,9 +1,14 @@
 import { pool, tokens } from "@prisma/client";
 import { prisma } from "./services/db";
 import axios from "axios";
+import { WebhookClient } from "discord.js";
 import { SocksProxyAgent } from "socks-proxy-agent";
 import { baseTokenMappingCMC } from "./const";
 import { formatUnits } from "viem";
+
+const webhookClient = new WebhookClient({
+  url: "https://discord.com/api/webhooks/1209085042844897290/ts-e9W3Yos99qyeDQF6hquTQETaMcT4OFFVbb9pD0CXNzreA_SW48vSoqwbxKnaD8iJX",
+});
 
 const cmcAPI = axios.create({
   baseURL: "https://api.coinmarketcap.com",
@@ -486,8 +491,14 @@ export const tryCatchFn =
   async (...input: any) => {
     try {
       return await fn(...input);
-    } catch (error) {
-      console.error(error);
+    } catch (err) {
+      console.error(err);
+      await webhookClient
+        .send({
+          content: err?.message || err,
+          username: "Swap Indexer Bot",
+        })
+        .catch((alertErr) => console.error(alertErr));
       return defaultValue;
     }
   };

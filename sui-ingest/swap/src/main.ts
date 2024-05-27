@@ -74,16 +74,15 @@ export const processingConfig: EventIndexerConfig = {
     if (process.env.TEST) {
       console.log(processData);
     } else {
-      await prisma.trade
-        .createMany({
-          data: processData,
-          skipDuplicates: true,
-        })
-        .catch((error) => {
-          console.log(error);
-
-          throw error;
-        });
+      await prisma.trade.createMany({
+        data: processData,
+        skipDuplicates: true,
+      });
+      // TODO: remove catch if failed then consumer not commit offset and must restart to consume
+      // .catch((error) => {
+      //   console.log(error);
+      //   throw error;
+      // });
     }
 
     console.log(
