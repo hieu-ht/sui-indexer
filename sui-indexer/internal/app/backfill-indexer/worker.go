@@ -261,7 +261,7 @@ func (w *worker) fetchTxs(ctx context.Context, checkpointCh chan<- *sui_model.Ch
 					}
 				}
 				return nil
-			}
+			}()
 			if fetchDataErr != nil {
 				logger.Errorf("failed to fetch txs: %v", fetchDataErr)
 				// update status FAIL
