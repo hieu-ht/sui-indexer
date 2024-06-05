@@ -164,30 +164,23 @@ const backfillData = async (config: IndexerConfig) => {
 
   let batch = 0;
 
-  readStream
-    .pipe(csv.parse({ headers: true }))
-    .on("error", (error) => console.error(error))
-    .on("data", async (row) => {
-      if (Number(row.checkpoint) > from && Number(row.checkpoint) < to) {
-        // In-range check
-        rows.push(row);
-      }
-      if (rows.length >= config.backfillBatch) {
-        readStream.pause();
-        await processData(rows);
-        console.log(`Done process ${batch}`);
-        batch++;
-        readStream.resume();
-        await processData(rows);
-        rows = [];
-      }
-    })
-    .on("end", async (rowCount: number) => {
-      if (rows.length) {
-        await processData(rows);
-      }
-      console.log(`Done backfill ${rowCount} rows`);
-    });
+  const csvStream = readStream.pipe(csv.parse({ headers: true }));
+
+  for await (const row of csvStream) {
+    if (Number(row.checkpoint) > from && Number(row.checkpoint) < to) {
+      // In-range check
+      rows.push(row);
+    }
+    if (rows.length >= config.backfillBatch) {
+      readStream.pause();
+      await processData(rows);
+      console.log(`Done process ${batch}`);
+      batch++;
+      readStream.resume();
+      await processData(rows);
+      rows = [];
+    }
+  }
 };
 
 function start() {
