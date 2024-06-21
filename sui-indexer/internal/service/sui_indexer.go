@@ -57,6 +57,9 @@ func (svc *SuiIndexer) FetchCheckpoints(ctx context.Context, fromCheckpointId st
 		return nil, fmt.Errorf("to checkpoint id must be equal or larger than fromCheckpointId")
 	}
 	limit := toId - fromId
+	if limit > 100 {
+		limit = 100
+	}
 
 	var resp = struct {
 		Data        []*sui_model.Checkpoint `json:"data"`

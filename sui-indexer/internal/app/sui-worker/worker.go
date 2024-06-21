@@ -62,8 +62,8 @@ func NewWorker(
 		baseSvc:          baseSvc,
 		suiIndexer:       service.NewSuiIndexer(client, fallbackClient),
 		cache:            expirable.NewLRU[string, bool](500, nil, 50*time.Second),
-		limitCheckpoints: 5, // maximum is 5
-		numWorkers:       20,
+		limitCheckpoints: 10, // maximum is 10
+		numWorkers:       10,
 		cooldown:         3 * time.Second,
 		checkpointsTopic: conf.Config.SuiCheckpointsTopic,
 		txsTopic:         conf.Config.SuiTxsTopic,
@@ -164,61 +164,52 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 		return nil
 	}
 
-	checkpoints, err := retry.DoWithData(
-		func() ([]*sui_model.Checkpoint, error) {
-			var res = make([]*sui_model.Checkpoint, 0)
-
-			newCheckpointIds := lo.Filter(blockStatuses, func(item *entity.BlockStatus, _ int) bool {
-				return item.Status == entity.BlockStatus_NOT_READY
-			})
-			if len(newCheckpointIds) > 0 {
-				newCheckpoints, err := w.suiIndexer.FetchCheckpoints(ctx, strconv.FormatInt(newCheckpointIds[0].BlockNumber, 10), strconv.FormatInt(newCheckpointIds[len(newCheckpointIds)-1].BlockNumber, 10))
-				if err != nil {
-					return nil, err
-				}
-				res = append(res, newCheckpoints...)
-			}
-
-			retryCheckpointIds := lo.Filter(blockStatuses, func(item *entity.BlockStatus, _ int) bool {
-				return item.Status == entity.BlockStatus_FAIL
-			})
-			if len(retryCheckpointIds) > 0 {
-				retryCheckpoints := make([]*sui_model.Checkpoint, 0)
-				for i, item := range retryCheckpointIds {
-					checkpoint, err := w.suiIndexer.FetchCheckpoint(ctx, strconv.FormatInt(item.BlockNumber, 10))
-					if err != nil {
-						return nil, err
-					}
-					retryCheckpoints = append(retryCheckpoints, checkpoint)
-					// cooldown api
-					if i%3 == 0 {
-						time.Sleep(1 * time.Second)
-					}
-				}
-				res = append(res, retryCheckpoints...)
-			}
-
-			return res, nil
-		},
-		// retry configs
-		[]retry.Option{
-			retry.Attempts(uint(5)),
-			retry.OnRetry(func(n uint, err error) {
-				logger.Errorf("Retry invoke function %d to and get error: %v", n+1, err)
-			}),
-			retry.Delay(3 * time.Second),
-			retry.Context(ctx),
-		}...,
+	var (
+		checkpoints = make([]*sui_model.Checkpoint, 0)
+		wg1         sync.WaitGroup
 	)
-	if err != nil {
-		logger.Errorf("failed to fetch checkpoint from %v: %v", blockStatuses[0].BlockNumber, err)
-		// if node rpc has some errors so that it cannot return checkpoints => update status to failed
-		// update status FAIL
-		w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, blockStatuses...)
-		return fmt.Errorf("failed to fetch checkpoint from %v: %v", blockStatuses[0].BlockNumber, err)
+	for _, b := range blockStatuses {
+		blockStatus := b
+		wg1.Add(1)
+
+		go func() {
+			defer wg1.Done()
+
+			checkpoint, err := retry.DoWithData(
+				func() (*sui_model.Checkpoint, error) {
+					return w.suiIndexer.FetchCheckpoint(ctx, strconv.FormatInt(blockStatus.BlockNumber, 10))
+				},
+				// retry configs
+				[]retry.Option{
+					retry.Attempts(uint(5)),
+					retry.OnRetry(func(n uint, err error) {
+						logger.Errorf("Retry invoke function FetchCheckpoint %d to and get error: %v", n+1, err)
+					}),
+					retry.Delay(3 * time.Second),
+					retry.Context(ctx),
+				}...,
+			)
+			if err != nil {
+				logger.Errorf("failed to fetch checkpoint from %v: %v", blockStatus.BlockNumber, err)
+				// if node rpc has some errors so that it cannot return checkpoints => update status to failed
+				// update status FAIL
+				w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, blockStatus)
+				return
+			}
+
+			checkpoints = append(checkpoints, checkpoint)
+		}()
 	}
 
-	var wg sync.WaitGroup
+	// wait for all workers to finish
+	wg1.Wait()
+
+	if len(checkpoints) == 0 {
+		logger.Warnf("no data checkpoints to process")
+		w.updateCheckpointStatus(ctx, entity.BlockStatus_FAIL, blockStatuses...)
+		return nil
+	}
+	var wg2 sync.WaitGroup
 	for _, c := range checkpoints {
 		checkpoint := c.WithDateKey()
 		blockStatus, ok := lo.Find(blockStatuses, func(item *entity.BlockStatus) bool {
@@ -235,9 +226,9 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 			continue
 		}
 
-		wg.Add(1)
+		wg2.Add(1)
 		go func() {
-			defer wg.Done()
+			defer wg2.Done()
 
 			var fetchDataErr = func() error {
 				uniqueTxs := lo.Uniq(checkpoint.Transactions)
@@ -251,7 +242,7 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 						[]retry.Option{
 							retry.Attempts(uint(5)),
 							retry.OnRetry(func(n uint, err error) {
-								logger.Errorf("Retry invoke function %d to and get error: %v", n+1, err)
+								logger.Errorf("Retry invoke function FetchTxs %d to and get error: %v", n+1, err)
 							}),
 							retry.Delay(3 * time.Second),
 							retry.Context(ctx),
@@ -389,7 +380,7 @@ func (w *worker) fetchTxs(ctx context.Context) error {
 	}
 
 	// wait for all workers to finish
-	wg.Wait()
+	wg2.Wait()
 
 	return nil
 }
