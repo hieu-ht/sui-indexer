@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { protocols } from "./protocols";
 import { suiClient } from "./services/client";
 import { prisma } from "./services/db";
